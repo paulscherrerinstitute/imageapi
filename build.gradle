@@ -1,0 +1,52 @@
+plugins {
+    id 'org.springframework.boot' version '2.2.4.RELEASE'
+    id 'maven-publish'
+    id 'java'
+}
+
+apply plugin: 'java'
+apply plugin: 'io.spring.dependency-management'
+apply plugin: 'org.springframework.boot'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+group 'ch.psi.daq'
+version '0.0.0.000'
+
+repositories {
+    mavenCentral()
+    maven { url "https://artifacts.psi.ch/artifactory/libs-snapshots-local" }
+}
+
+dependencies {
+    implementation 'ch.qos.logback:logback-classic:1.2.3'
+    implementation 'org.junit.jupiter:junit-jupiter:5.6.0'
+    implementation 'org.springframework.boot:spring-boot-starter-webflux:2.2.4.RELEASE'
+    implementation 'org.springframework.boot:spring-boot-starter-reactor-netty:2.2.4.RELEASE'
+    implementation 'io.projectreactor.netty:reactor-netty:0.9.4.RELEASE'
+    implementation 'com.google.guava:guava:28.2-jre'
+    implementation 'ch.psi:bsread:3.5.13'
+}
+
+jar { enabled = true }
+bootJar { classifier = 'all' }
+
+publishing {
+    publications {
+        bootJava(MavenPublication) {
+            artifact bootJar
+        }
+    }
+    repositories {
+        maven {
+            url 'https://artifacts.psi.ch/artifactory/libs-snapshots-local'
+            credentials {
+                username = 'upload'
+                password = 'AP7pYDKfdXVWMnSQ'
+            }
+        }
+    }
+}
