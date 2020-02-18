@@ -1,11 +1,10 @@
-package ch.psi.daq.imageapi3;
+package ch.psi.daq.imageapi;
 
 import ch.psi.bsread.compression.Compression;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
-import java.time.Instant;
 
 // TODO functions in here need to be bundled/encapsulated with the buffer as they operate on/with the position of the buffer !!!!
 

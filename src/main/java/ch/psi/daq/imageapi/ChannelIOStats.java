@@ -1,4 +1,4 @@
-package ch.psi.daq.imageapi3;
+package ch.psi.daq.imageapi;
 
 public class ChannelIOStats {
     public Average avg;

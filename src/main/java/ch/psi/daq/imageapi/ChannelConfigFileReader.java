@@ -1,4 +1,4 @@
-package ch.psi.daq.imageapi3;
+package ch.psi.daq.imageapi;
 
 import ch.psi.bsread.compression.Compression;
 import org.slf4j.Logger;

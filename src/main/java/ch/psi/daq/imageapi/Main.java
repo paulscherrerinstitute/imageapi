@@ -1,4 +1,4 @@
-package ch.psi.daq.imageapi3;
+package ch.psi.daq.imageapi;
 
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;

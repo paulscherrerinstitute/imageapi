@@ -1,4 +1,4 @@
-package ch.psi.daq.imageapi3;
+package ch.psi.daq.imageapi;
 
 import java.nio.file.Path;
 import java.time.Instant;

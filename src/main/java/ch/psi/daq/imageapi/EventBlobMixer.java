@@ -1,10 +1,8 @@
-package ch.psi.daq.imageapi3;
+package ch.psi.daq.imageapi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import reactor.core.publisher.Mono;
 import reactor.core.publisher.SynchronousSink;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;

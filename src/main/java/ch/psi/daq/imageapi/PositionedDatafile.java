@@ -1,4 +1,4 @@
-package ch.psi.daq.imageapi3;
+package ch.psi.daq.imageapi;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

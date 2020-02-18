@@ -1,10 +1,9 @@
-package ch.psi.daq.imageapi3;
+package ch.psi.daq.imageapi;
 
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 
 public class FileManagerTest implements IFileManager {
