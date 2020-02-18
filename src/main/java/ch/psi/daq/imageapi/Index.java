@@ -1,28 +1,29 @@
 package ch.psi.daq.imageapi;
 
+import com.google.common.io.BaseEncoding;
 import reactor.core.publisher.Mono;
 import reactor.netty.ByteBufFlux;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 public class Index {
     static final int N = 16;
 
     static class FindResult {
+        int i;
         long k;
         long v;
         static FindResult none() {
             FindResult ret = new FindResult();
+            ret.i = -1;
             ret.k = -1;
             ret.v = 0;
             return ret;
         }
         static FindResult at(byte[] a, int i) {
             FindResult ret = new FindResult();
+            ret.i = i;
             ret.k = keyLongAt(a, i);
             ret.v = valueLongAt(a, i);
             return ret;
@@ -43,14 +44,15 @@ public class Index {
         byte[] buf2 = new byte[8];
         ByteBuffer buf = ByteBuffer.allocate(8);
         buf.putLong(0, tgt);
-        buf.clear();
-        buf.limit(8);
+        buf.flip();
         buf.get(buf2);
         return findGE(buf2, a);
     }
 
     static FindResult findGE(byte[] tgt, byte[] a) {
-        assertEquals(0, a.length % N);
+        if (a.length % N != 0) {
+            throw new RuntimeException("findGE unexpected length");
+        }
         int n = a.length;
         if (n < N) {
             return FindResult.none();
@@ -90,11 +92,8 @@ public class Index {
         return 0;
     }
 
-    static void show(byte[] buf, int a) {
-        for (int i = 0; i < 8; i+=1) {
-            System.err.print(String.format("%02x", buf[a+i]));
-        }
-        System.err.println();
+    static String show(byte[] buf, int a) {
+        return BaseEncoding.base16().lowerCase().encode(buf, a, 8);
     }
 
     static Mono<byte[]> openIndex(Path indexPath) {
@@ -102,9 +101,16 @@ public class Index {
         .aggregate()
         .map(buf -> {
             long nLong = buf.readableBytes();
-            assertTrue(nLong < Integer.MAX_VALUE);
-            int n = (int)nLong;
-            assertEquals(0, (n-2)%N);
+            if (nLong < 2) {
+                throw new RuntimeException(String.format("Index file is too small %s", indexPath));
+            }
+            if (nLong >= Integer.MAX_VALUE) {
+                throw new RuntimeException(String.format("nLong >= Integer.MAX_VALUE  %s", indexPath));
+            }
+            int n = (int) nLong;
+            if ((n-2) % N != 0) {
+                throw new RuntimeException(String.format("unexpected index file content  %s", indexPath));
+            }
             n = n - 2;
             byte[] a = new byte[n];
             buf.getBytes(2, a);
