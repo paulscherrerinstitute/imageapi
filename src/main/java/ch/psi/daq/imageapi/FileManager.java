@@ -37,35 +37,6 @@ public class FileManager {
     long updatedLast;
     Collection<String> channelNamesLast;
 
-    /**
-     *
-     * Directory structure for data
-     * &lt;root_dir&gt; # usually /data/sf-databuffer
-     *     &lt;base_keyspace_name&gt; # daq_swissfel = baseDir
-     *         config
-     *             &lt;channel_name&gt;
-     *                 latest
-     *                     00000_Config # 00000 = version number serializer
-     *             ...
-     *         &lt;base_keyspace_name&gt;_2 # Scalar
-     *             byTime
-     *                 &lt;channel_name&gt;
-     *                     0000000000000017741 # bin = time(ms)/bin_size(ms) / increasing number
-     *                         0000000000 # split starting at 0 - basically this is the machine/writer id/number
-     *                             0000000000086400000_00000_Data  # 0000000000086400000 = bin_size(ms)  00000 = Serializer version
-     *                             0000000000086400000_00000_Data_Index  # Index file for data - used for waveforms/images only
-     *                             0000000000086400000_00000_Stats  # ????
-     *                             0000000000086400000_Data_TTL # ????
-     *                             0000000000086400000_Stats_TTL # ????
-     *         &lt;base_keyspace_name&gt;_3 # Waveforms
-     *         &lt;base_keyspace_name&gt;_4 # Images
-     *         meta
-     *             byPulse
-     *             byTime
-     *
-     * @param rootDir
-     * @param baseKeyspaceName
-     */
     public FileManager(@Value("${rootDir}") String rootDir, @Value("${baseKeyspaceName}") String baseKeyspaceName, @Value("${binSize}") int binSize){
         this.rootDir = rootDir;
         this.baseKeyspaceName = baseKeyspaceName;
