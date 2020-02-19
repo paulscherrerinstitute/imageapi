@@ -18,7 +18,7 @@ version '0.0.0.000'
 
 repositories {
     mavenCentral()
-    maven { url "https://artifacts.psi.ch/artifactory/libs-snapshots-local" }
+    maven { url "https://dl.bintray.com/paulscherrerinstitute/hltools" }
 }
 
 dependencies {
@@ -28,7 +28,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-reactor-netty:2.2.4.RELEASE'
     implementation 'io.projectreactor.netty:reactor-netty:0.9.4.RELEASE'
     implementation 'com.google.guava:guava:28.2-jre'
-    implementation 'ch.psi:bsread:3.5.13'
+    implementation group: 'ch.psi', name: 'bsread', version: '3.5.14'
     testImplementation group: 'junit', name: 'junit', version: '4.12'
 }
 
