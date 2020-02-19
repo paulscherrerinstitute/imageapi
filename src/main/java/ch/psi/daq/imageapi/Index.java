@@ -43,7 +43,7 @@ public class Index {
     static FindResult findGEByLong(long tgt, byte[] a) {
         byte[] buf2 = new byte[8];
         ByteBuffer buf = ByteBuffer.allocate(8);
-        buf.putLong(0, tgt);
+        buf.putLong(tgt);
         buf.flip();
         buf.get(buf2);
         return findGE(buf2, a);
