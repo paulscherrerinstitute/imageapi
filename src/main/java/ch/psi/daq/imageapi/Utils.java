@@ -61,7 +61,7 @@ public class Utils {
             SeekToBeginResult res = Utils.seekToBegin(c, begin);
             if (!res.isOk()) { throw new RuntimeException("Could not seek.  TODO handle this more gracefully."); }
             LOGGER.debug("lengthOfFirstBlob: {}", res.lengthOfFirstBlob());
-            return PositionedDatafile.fromChannel(c, path);
+            return PositionedDatafile.fromChannel(c, path, -1);
         })
         .subscribeOn(Schedulers.boundedElastic());
     }
@@ -179,40 +179,6 @@ public class Utils {
         }
     }
 
-    // TODO why no need to declare SeekError?
-    public static Mono<PositionedDatafile> openAndPosition(Path path, String channelName, Instant begin) {
-        return Index.openIndex(Path.of(path.toString() + "_Index"))
-        .map(x -> Index.findGEByLong(instantToNanoLong(begin), x))
-        .flatMap(x -> {
-            return Mono.fromCallable(() -> {
-                SeekableByteChannel c = Files.newByteChannel(path, StandardOpenOption.READ);
-                // TODO verify correct channel name here
-                if (x.v >= c.size()) {
-                    throw SeekError.empty();
-                }
-                c.position(x.v);
-                return PositionedDatafile.fromChannel(c, path);
-            });
-        })
-        .subscribeOn(Schedulers.boundedElastic());
-    }
-
-    static void comparePositions(List<PositionedDatafile> l1, List<PositionedDatafile> l2) {
-        if (l1.size() != l2.size()) {
-            throw new RuntimeException("Both methods should yield the same");
-        }
-        for (int i = 0; i < l1.size(); i+=1) {
-            try {
-                if (l1.get(i).channel.position() != l2.get(i).channel.position()) {
-                    throw new RuntimeException("BAD");
-                }
-            }
-            catch (IOException e) {
-                throw new RuntimeException("Seeked to different positions");
-            }
-        }
-    }
-
     // TODO
     static long instantToNanoLong(Instant begin) { return 1000000 * begin.toEpochMilli(); }
 
@@ -221,79 +187,7 @@ public class Utils {
         public String type;
         public String compression;
         public String byteOrder;
-        public Collection<Integer> shape;
-    }
-
-    static Flux<ByteBuffer> blobToRestChunk(String channelName, PositionedDatafile.Blob blob, boolean isFirst) {
-        ByteBuffer bufHeader = Utils.allocateByteBuffer(2048);
-        // getDType expects a buffer that starts with the event TTL
-        // and ends with?
-        DType dtype = DataBlobUtils.getDType(blob.blobBuf.slice());
-        int valueOffset = dtype.getBufferReadOffsetForValue();
-        int valueLength = (blob.blobBuf.slice().limit() - valueOffset - 1 * Integer.BYTES);
-        //LOGGER.info("valueOffset: {}  valueLength: {}", valueOffset, valueLength);
-        if (isFirst) {
-            //LOGGER.info("++++++++++++    PUTTING JSON");
-            Collection<Integer> shape = new ArrayList<>();
-            for (int x : dtype.getShape()) {
-                shape.add(x);
-            }
-            BlobJsonHeader header = new BlobJsonHeader();
-            header.name = channelName;
-            header.type = dtype.getType().toString().toLowerCase();
-            header.compression = String.format("%d", dtype.getCompression().getId());
-            header.byteOrder = dtype.getByteOrder().toString();
-            header.shape = shape;
-            ObjectWriter ow = new ObjectMapper().writer();
-            String headerString;
-            try {
-                headerString = ow.writeValueAsString(header);
-            } catch (JsonProcessingException e) {
-                throw new RuntimeException("JsonProcessingException");
-            }
-            /*
-            [int length1 of only the bytes between these two length fields]
-              [byte(0)]
-              [json utf8 string without null terminator]
-            [int length1]
-            [int length2 of only the bytes between these two length fields]
-              [byte(1)]
-              [long timestamp]
-              [long pulseid]
-              [value]
-            [int length2]
-            */
-            int posOfLen1 = bufHeader.position();
-            bufHeader.putInt(0);
-            bufHeader.put((byte) 0);
-            int tmp1 = bufHeader.position();
-            bufHeader.put(headerString.getBytes(StandardCharsets.UTF_8));
-            int lengthJsonHeaderString = bufHeader.position() - tmp1 + 1;
-            bufHeader.putInt(posOfLen1, lengthJsonHeaderString);
-            bufHeader.putInt(lengthJsonHeaderString);
-        }
-
-        int CONSTOFF = 0;
-        int len2 = Byte.BYTES + 2 * Long.BYTES + valueLength + CONSTOFF;
-        bufHeader.putInt(len2);
-        bufHeader.put((byte)1);
-        bufHeader.putLong(blob.ts);
-        bufHeader.putLong(blob.pulseid);
-        bufHeader.flip();
-
-        ByteBuffer valueBuf = blob.blobBuf.slice();
-        valueBuf.position(valueOffset);
-        valueBuf.limit(valueOffset + valueLength + CONSTOFF);
-        if (valueBuf.remaining() != valueLength) {
-            LOGGER.error("valueBuf.remaining() != valueLength   {} vs {}", valueBuf.remaining(), valueLength);
-            throw new RuntimeException("valueBuf.remaining() != valueLength");
-        }
-
-        ByteBuffer len2copy = Utils.allocateByteBuffer(Integer.BYTES);
-        len2copy.putInt(len2);
-        len2copy.flip();
-
-        return Flux.just(bufHeader, valueBuf, len2copy);
+        public List<Integer> shape;
     }
 
     public static ByteBuffer allocateByteBuffer(int len) {

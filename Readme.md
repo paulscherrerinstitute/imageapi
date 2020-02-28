@@ -34,3 +34,5 @@ ${prefix}
       "byPulse"  ???
       "byTime"   ???
 ```
+
+So far the bin size for images is 3600000, all others 86400000.

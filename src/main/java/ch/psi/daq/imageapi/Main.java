@@ -15,6 +15,7 @@ public class Main implements ApplicationRunner {
     }
 
     public static void main(final String[] args) {
+        TestInfo.test();
         SpringApplication.run(Main.class, args);
     }
 

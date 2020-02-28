@@ -1,3 +1,8 @@
+/**
+ * Copied from ch.psi.daq.databuffer project
+ *
+ */
+
 package ch.psi.daq.imageapi;
 
 import ch.psi.bsread.compression.Compression;

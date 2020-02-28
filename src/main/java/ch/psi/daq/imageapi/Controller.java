@@ -19,6 +19,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import reactor.util.function.Tuple2;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -28,6 +29,20 @@ import java.time.Instant;
 import java.util.*;
 import java.util.function.*;
 import java.util.stream.Collectors;
+
+class ChannelWithFiles {
+    String name;
+    Utils.MatchingDataFilesResult files;
+    public static ChannelWithFiles create(String name, Utils.MatchingDataFilesResult files) {
+        ChannelWithFiles ret = new ChannelWithFiles();
+        ret.name = name;
+        ret.files = files;
+        return ret;
+    }
+    public static ChannelWithFiles fromTuple(Tuple2<String, Utils.MatchingDataFilesResult> tup) {
+        return create(tup.getT1(), tup.getT2());
+    }
+}
 
 @RestController
 @RequestMapping("api/v1")
@@ -42,15 +57,15 @@ public class Controller {
     public Mono<ResponseEntity<Flux<DataBuffer>>> query(ServerWebExchange xc, ServerHttpResponse res, @RequestHeader HttpHeaders headers, @RequestBody Query query) {
         RequestStats requestStats = RequestStats.empty(xc);
         Range range = query.getRange();
-        Instant start;
+        Instant begin;
         Instant end;
         if (range instanceof DateRange) {
-            start = ((DateRange)range).getStartDate();
+            begin = ((DateRange)range).getStartDate();
             end = ((DateRange)range).getEndDate();
-            if (start.isAfter(end)) {
-                throw new IllegalArgumentException(String.format("Start date %s is before end %s date", start, end));
+            if (begin.isAfter(end)) {
+                throw new IllegalArgumentException(String.format("Start date %s is before end %s date", begin, end));
             }
-            requestStats.rangeBegin = start;
+            requestStats.rangeBegin = begin;
             requestStats.rangeEnd = end;
         }
         else {
@@ -58,12 +73,14 @@ public class Controller {
         }
 
         IFileManager fileManager;
-        if (headers.containsKey("x-use-test-filemanager")) {
+        if (query.getChannels().contains("test01") || headers.containsKey("x-use-test-filemanager")) {
             fileManager = new FileManagerTest();
         }
         else {
             fileManager = filemanagerProduction();
         }
+
+        final ChannelEventStream eventStreamMethod = new ChannelEventStream(res.bufferFactory());
 
         long t1;
         long t2;
@@ -82,41 +99,16 @@ public class Controller {
         t2 = System.nanoTime();
         requestStats.checkAllChannelsContained = Microseconds.fromNanos(t2 - t1);
 
-        long beginNano = Utils.instantToNanoLong(start);
+        long beginNano = Utils.instantToNanoLong(begin);
         long endNano = Utils.instantToNanoLong(end);
-
-        DataBufferFactory bufFac = res.bufferFactory();
 
         Flux<DataBuffer> responseBody = Flux.fromStream(query.getChannels().stream())
         .flatMapSequential(channelName -> {
             // TODO limit the number of files that can be found to prevent excessive requests
-            return Mono.just(channelName).zipWith(Utils.matchingDataFiles(fileManager, channelName, start, end));
+            return Mono.just(channelName).zipWith(Utils.matchingDataFiles(fileManager, channelName, begin, end));
         }, 1)
-        .flatMapSequential(tup1 -> {
-            String channelName = tup1.getT1();
-            List<List<Path>> listOverBins = tup1.getT2().list;
-            requestStats.locateDataFiles = tup1.getT2().duration;
-            BlobToRestChunker chunker = new BlobToRestChunker();
-            return Flux.fromStream(listOverBins.stream())
-            .flatMapSequential(listOverSplits ->
-                Flux.fromStream(listOverSplits.stream())
-                .flatMapSequential(path2 -> Utils.openAndPosition(path2, channelName, start), 1)
-                .collectList(),
-                1
-            )
-            .flatMapSequential(positionedFiles ->
-                Flux.generate(() -> EventBlobMixer.create(positionedFiles, beginNano, endNano), EventBlobMixer::sinkNext)
-                .doOnComplete(() -> {
-                    Average avg = positionedFiles.stream().flatMap(x -> x.blockDurationsMicros.stream()).collect(AverageCollector.create());
-                    Deviation dev = positionedFiles.stream().flatMap(x -> x.blockDurationsMicros.stream()).collect(DeviationCollector.create(avg));
-                    requestStats.addChannelIOStats(channelName, ChannelIOStats.create(avg, dev));
-                }),
-                1
-            )
-            .flatMapSequential(blob -> chunker.chunk(channelName, blob), 1)
-            .subscribeOn(Schedulers.boundedElastic());
-        }, 1)
-        .map(bufFac::wrap)
+        .map(ChannelWithFiles::fromTuple)
+        .flatMapSequential(channelWithFiles -> eventStreamMethod.bufferFluxFromFiles(channelWithFiles, requestStats, beginNano, endNano), 1)
         .doOnComplete(() -> {
             requestStats.endNow();
             LOGGER.info(toJsonString(requestStats));
@@ -124,6 +116,73 @@ public class Controller {
         ResponseEntity<Flux<DataBuffer>> responseEntity = ResponseEntity.ok()
         .contentType(MediaType.APPLICATION_OCTET_STREAM)
         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"data.blob\"")
+        .body(responseBody);
+        return Mono.just(responseEntity);
+    }
+
+    @PostMapping(path = "listpulses", consumes=MediaType.APPLICATION_JSON_VALUE, produces = MediaType.TEXT_PLAIN_VALUE)
+    public Mono<ResponseEntity<Flux<String>>> listpulses(ServerWebExchange xc, ServerHttpResponse res, @RequestHeader HttpHeaders headers, @RequestBody Query query) {
+        RequestStats requestStats = RequestStats.empty(xc);
+        Range range = query.getRange();
+        Instant begin;
+        Instant end;
+        if (range instanceof DateRange) {
+            begin = ((DateRange)range).getStartDate();
+            end = ((DateRange)range).getEndDate();
+            if (begin.isAfter(end)) {
+                throw new IllegalArgumentException(String.format("Start date %s is before end %s date", begin, end));
+            }
+            requestStats.rangeBegin = begin;
+            requestStats.rangeEnd = end;
+        }
+        else {
+            throw new IllegalArgumentException("Can not parse request");
+        }
+
+        IFileManager fileManager;
+        if (query.getChannels().contains("test01") || headers.containsKey("x-use-test-filemanager")) {
+            fileManager = new FileManagerTest();
+        }
+        else {
+            fileManager = filemanagerProduction();
+        }
+
+        final ChannelEventStream eventStreamMethod = new ChannelEventStream(res.bufferFactory());
+
+        long t1;
+        long t2;
+        t2 = System.nanoTime();
+
+        Collection<String> channelNames = fileManager.getChannelNames();
+        t1 = t2;
+        t2 = System.nanoTime();
+        requestStats.getChannelNamesDuration = Microseconds.fromNanos(t2 - t1);
+
+        if (!channelNames.containsAll(query.getChannels())) {
+            LOGGER.error("Some channels not found "+ query.getChannels());
+            return Mono.just(ResponseEntity.notFound().build());
+        }
+        t1 = t2;
+        t2 = System.nanoTime();
+        requestStats.checkAllChannelsContained = Microseconds.fromNanos(t2 - t1);
+
+        long beginNano = Utils.instantToNanoLong(begin);
+        long endNano = Utils.instantToNanoLong(end);
+
+        Flux<String> responseBody = Flux.fromStream(query.getChannels().stream())
+        .flatMapSequential(channelName -> {
+            // TODO limit the number of files that can be found to prevent excessive requests
+            return Mono.just(channelName).zipWith(Utils.matchingDataFiles(fileManager, channelName, begin, end));
+        }, 1)
+        .map(ChannelWithFiles::fromTuple)
+        .flatMapSequential(channelWithFiles -> eventStreamMethod.listPulses(channelWithFiles, requestStats, beginNano, endNano), 1)
+        .map(x -> Controller.toJsonString(x) + "\n")
+        .doOnComplete(() -> {
+            requestStats.endNow();
+            LOGGER.info(toJsonString(requestStats));
+        });
+        ResponseEntity<Flux<String>> responseEntity = ResponseEntity.ok()
+        .contentType(MediaType.TEXT_PLAIN)
         .body(responseBody);
         return Mono.just(responseEntity);
     }
@@ -228,13 +287,23 @@ public class Controller {
 
     @GetMapping(path = "channels", produces = MediaType.APPLICATION_JSON_VALUE)
     public Collection<String> getChannels(@RequestParam(name="regex", required=false) String regex) {
-        Predicate<String> regexFilter = x -> true;
-        if(regex != null){
-            regexFilter = x -> x.matches(regex);
+        /*
+        TODO do we really want to allow regex?
+        Keep it for compatibility here.
+        */
+        try {
+            Predicate<String> regexFilter = x -> true;
+            if (regex != null) {
+                regexFilter = x -> x.matches(regex);
+            }
+            return filemanagerProduction().getChannelNames().stream()
+            .filter(regexFilter)
+            .collect(Collectors.toList());
         }
-        return filemanagerProduction().getChannelNames().stream()
-        .filter(regexFilter)
-        .collect(Collectors.toList());
+        catch (java.util.regex.PatternSyntaxException e) {
+            LOGGER.error("Regex error on {}", regex);
+            throw e;
+        }
     }
 
     @GetMapping(path = "channel/{channelName}", produces = MediaType.APPLICATION_JSON_VALUE)

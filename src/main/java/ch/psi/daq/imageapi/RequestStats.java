@@ -19,6 +19,7 @@ public class RequestStats {
     public Microseconds totalDuration;
     long requestTimeBegin = System.nanoTime();
     public final Map<String, ChannelIOStats> channelIOStats = new HashMap<>();
+    public final Map<String, Microseconds> channelSeekDurations = new HashMap<>();
     public Instant rangeBegin;
     public Instant rangeEnd;
 
@@ -26,7 +27,7 @@ public class RequestStats {
         address = xc.getRequest().getRemoteAddress();
         HttpHeaders headers = xc.getRequest().getHeaders();
         headerAccept = headers.getOrDefault("Accept", List.of());
-        headerAccept = headers.getOrDefault("Accept-Encoding", List.of());
+        headerAcceptEncoding = headers.getOrDefault("Accept-Encoding", List.of());
     }
 
     public static RequestStats empty(ServerWebExchange xc) {
@@ -40,6 +41,12 @@ public class RequestStats {
     public void addChannelIOStats(String k, ChannelIOStats v) {
         synchronized (channelIOStats) {
             channelIOStats.put(k, v);
+        }
+    }
+
+    public void addChannelSeekDuration(String k, Microseconds v) {
+        synchronized (channelSeekDurations) {
+            channelSeekDurations.put(k, v);
         }
     }
 

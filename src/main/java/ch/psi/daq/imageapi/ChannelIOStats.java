@@ -1,16 +1,12 @@
 package ch.psi.daq.imageapi;
 
 public class ChannelIOStats {
-    public Average avg;
-    public Deviation dev;
 
-    public ChannelIOStats(Average avg, Deviation dev) {
-        this.avg = avg;
-        this.dev = dev;
+    public ChannelIOStats() {
     }
 
-    public static ChannelIOStats create(Average avg, Deviation dev) {
-        return new ChannelIOStats(avg, dev);
+    public static ChannelIOStats create() {
+        return new ChannelIOStats();
     }
 
 }

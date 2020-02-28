@@ -1,86 +1,59 @@
 package ch.psi.daq.imageapi;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Instant;
-import java.util.*;
+import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.Optional;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class FileManager {
-
     private static final Logger LOGGER = LoggerFactory.getLogger(FileManager.class);
 
     public static final String CONFIG_DIR = "config";
     public static final String META_DIR = "meta";
     public static final String BY_TIME_DIR = "byTime";
-    public static final String BY_PULSE_DIR = "byPulse";
-
     public static final String DATA_FILE_SUFFIX = "_Data";
-    public static final String INDEX_FILE_SUFFIX = "_Data_Index"; // only for data classes 3 and 4 (WAVEFORMS, IMAGES)
-    public static final String STATS_FILE_SUFFIX = "_Stats"; // only for data classes 3 and 4 (WAVEFORMS, IMAGES)
-
+    public static final String INDEX_FILE_SUFFIX = "_Data_Index";
     public static final String[] DATA_CLASS_SUFFIX = new String[]{"_2", "_3", "_4"}; // SCALARS, WAVEFORMS, IMAGES
+    static final String CONFIG_FILE_NAME = "00000_Config";
 
-
-    private final String rootDir;
-    private final String baseKeyspaceName;
     private final Path baseDir;
-    private final int binSize; // up to now bin size for images was 3600000, all others 86400000 (defined in dispatcher.properties)
+    private final int binSize;
 
     private Collection<Path> dataDirs;
 
     long updatedLast;
     Collection<String> channelNamesLast;
 
-    public FileManager(@Value("${rootDir}") String rootDir, @Value("${baseKeyspaceName}") String baseKeyspaceName, @Value("${binSize}") int binSize){
-        this.rootDir = rootDir;
-        this.baseKeyspaceName = baseKeyspaceName;
+    public FileManager(String rootDir, String baseKeyspaceName, int binSize) {
         this.baseDir = Paths.get(rootDir + File.separator + baseKeyspaceName);
         this.binSize = binSize;
+        discoverAvailableDataDirectories(baseKeyspaceName);
+    }
 
-        // Find out all available data directories
+    void discoverAvailableDataDirectories(String baseKeyspaceName) {
         try {
-            dataDirs = Files.list(getBaseDir())
+            dataDirs = Files.list(baseDir)
             .filter(p->p.getFileName().toString().startsWith(baseKeyspaceName))
-            .map(p -> p.resolve(BY_TIME_DIR))  // So far everything was stored by time so we append this
+            .map(p -> p.resolve(BY_TIME_DIR))
             .collect(Collectors.toList());
-        } catch (IOException e) {
-            LOGGER.error("Unable to locate data directories", e);
-            throw new RuntimeException(e);
         }
-    }
-
-    public Path getBaseDir(){
-        return baseDir;
-    }
-
-    /**
-     * Utility function to initialize the base directory structure
-     */
-    public void initializeBaseDirectoryStructure(){
-        try {
-            // Create base dir if it does not exist
-            Files.createDirectories(getBaseDir());
-
-            // Create data directories if they does not exist
-            List<Path> dataDirectories = Arrays.stream(DATA_CLASS_SUFFIX)
-            .map(n -> getBaseDir().resolve(baseKeyspaceName + n+"/"+BY_TIME_DIR))
-            .collect(Collectors.toList());
-            for(Path dir: dataDirectories){
-                Files.createDirectories(dir);
-            }
-
-            // create config and meta directory
-            Files.createDirectories(getBaseDir().resolve(CONFIG_DIR));
-            Files.createDirectories(getBaseDir().resolve(META_DIR));
-
-        } catch (IOException e) {
-            LOGGER.error("Unable to initialize base directory structure", e);
+        catch (IOException e) {
+            LOGGER.error("Unable to locate data directories", e);
             throw new RuntimeException(e);
         }
     }
@@ -142,13 +115,6 @@ public class FileManager {
 //        return dataFiles;
 //    }
 
-    /**
-     *
-     * @param channelName
-     * @param start
-     * @param end
-     * @return  List of List of paths - first list is bin list, second list is because of split
-     */
     public List<List<Path>> locateDataFiles(String channelName, Instant start, Instant end) throws IOException {
 
         // Locate base directory for given channel
@@ -206,17 +172,13 @@ public class FileManager {
         return dataFiles;
     }
 
-    /**
-     * Locate the config file for a specific channel based on the standard directory structure
-     * @param channelName
-     * @return
-     */
     public Path locateConfigFile(String channelName){
-        Path path = baseDir.resolve("config/"+channelName+"/latest/00000_Config"); // We currently hardcode the version of the deserializer
-        if(!Files.exists(path)){
+        Path path = baseDir.resolve(CONFIG_DIR).resolve(channelName).resolve("latest").resolve(CONFIG_FILE_NAME);
+        if (!Files.exists(path)) {
             LOGGER.warn("Unable to locate config file for channel {} at {}", channelName, path);
-            return null;
+            throw new RuntimeException("Unable to locate config file");
         }
         return path;
     }
+
 }

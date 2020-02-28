@@ -15,7 +15,7 @@ public class FileManagerTest implements IFileManager {
 
     @Override
     public Collection<String> getChannelNames() {
-        return Arrays.asList("SARES20-CAMS142-M5:FPICTURE");
+        return Arrays.asList("test01");
     }
 
     @Override

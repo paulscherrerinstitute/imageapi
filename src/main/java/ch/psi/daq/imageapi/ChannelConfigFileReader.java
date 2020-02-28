@@ -1,3 +1,11 @@
+/**
+ * Copied from ch.psi.daq.databuffer project.
+ *
+ * TODO
+ * Create unit tests for existing code.
+ * Refactor for use with Reactor.
+ */
+
 package ch.psi.daq.imageapi;
 
 import ch.psi.bsread.compression.Compression;

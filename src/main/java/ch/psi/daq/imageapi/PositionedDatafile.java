@@ -8,7 +8,9 @@ import reactor.core.scheduler.Schedulers;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SeekableByteChannel;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Optional;
 
@@ -28,16 +30,23 @@ public class PositionedDatafile {
     Mono<Optional<Blob>> nextBlobMono;
     ArrayList<Integer> blockInstants = new ArrayList<>();
     ArrayList<Integer> blockDurationsMicros = new ArrayList<>();
+    long threadId;
 
-    PositionedDatafile(SeekableByteChannel channel, Path path) throws IOException {
+    PositionedDatafile(SeekableByteChannel channel, Path path, long threadId) throws IOException {
         this.path = path;
         this.channel = channel;
+        this.threadId = threadId;
         this.originalPosition = channel.position();
     }
 
-    public static PositionedDatafile fromChannel(SeekableByteChannel channel, Path path) {
+    /**
+     * @param channel The byte channel.
+     * @param path For error handling, remember the path of the byte channel.
+     * @param threadId For metrics, remember the thread on which we seek the file.
+     */
+    public static PositionedDatafile fromChannel(SeekableByteChannel channel, Path path, long threadId) {
         try {
-            PositionedDatafile x = new PositionedDatafile(channel, path);
+            PositionedDatafile x = new PositionedDatafile(channel, path, threadId);
             // TODO make sure that this is actually dispatched already here in the background.
             x.nextBlobMono = x.lengthOfNextBlob().flatMap(x::nextBlob).subscribeOn(Schedulers.boundedElastic());
             return x;
@@ -48,7 +57,23 @@ public class PositionedDatafile {
         }
     }
 
-    // TODO currently we throw if the file does not contain any events. Or should we silently accept that?
+    public static Mono<PositionedDatafile> openAndPosition(Path path, String channelName, long beginNano) {
+        return Index.openIndex(Path.of(path.toString() + "_Index"))
+        .map(x -> Index.findGEByLong(beginNano, x))
+        .flatMap(x -> {
+            return Mono.fromCallable(() -> {
+                SeekableByteChannel c = Files.newByteChannel(path, StandardOpenOption.READ);
+                // TODO verify correct channel name here
+                if (x.v >= c.size()) {
+                    throw Utils.SeekError.empty();
+                }
+                c.position(x.v);
+                return PositionedDatafile.fromChannel(c, path, Thread.currentThread().getId());
+            });
+        })
+        .subscribeOn(Schedulers.boundedElastic());
+    }
+
     Mono<Integer> lengthOfNextBlob() {
         return Mono.fromCallable(() -> {
             synchronized (channel) {
@@ -58,12 +83,13 @@ public class PositionedDatafile {
                     channel.read(buf);
                     buf.flip();
                     if (buf.limit() < 4) {
+                        LOGGER.error("unexpected EOF lengthOfNextBlob");
                         throw new RuntimeException("unexpected EOF");
                     }
                     return buf.getInt();
                 }
                 catch (IOException e) {
-                    LOGGER.error("IOException");
+                    LOGGER.error("IOException lengthOfNextBlob");
                     throw new RuntimeException("IOException");
                 }
             }
