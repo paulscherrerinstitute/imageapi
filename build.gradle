@@ -35,6 +35,9 @@ dependencies {
 jar { enabled = true }
 bootJar { classifier = 'all' }
 
+System.err.println("ACTOR:" + System.getenv("GITHUB_ACTOR"))
+System.err.println("TOKEN:" + System.getenv("GITHUB_TOKEN"))
+
 publishing {
     publications {
         bootJava(MavenPublication) {
@@ -52,8 +55,8 @@ publishing {
             */
             url 'https://maven.pkg.github.com/paulscherrerinstitute/imageapi'
             credentials {
-                username = '$System.env.GITHUB_ACTOR'
-                password = '$System.env.GITHUB_TOKEN'
+                username = System.getenv("GITHUB_ACTOR")
+                password = System.getenv("GITHUB_TOKEN")
             }
         }
     }
