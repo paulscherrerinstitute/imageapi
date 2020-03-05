@@ -35,8 +35,9 @@ dependencies {
 jar { enabled = true }
 bootJar { classifier = 'all' }
 
-System.err.println("ACTOR:" + System.getenv("GITHUB_ACTOR"))
-System.err.println("TOKEN:" + System.getenv("GITHUB_TOKEN"))
+System.err.println("GITHUB_ACTOR:" + System.getenv("GITHUB_ACTOR"))
+System.err.println("GITHUB_TOKEN:" + System.getenv("GITHUB_TOKEN"))
+System.err.println("GH_TOKEN:" + System.getenv("GH_TOKEN"))
 
 publishing {
     publications {
