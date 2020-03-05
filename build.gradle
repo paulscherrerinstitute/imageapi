@@ -1,12 +1,40 @@
+buildscript {
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.+'
+    }
+}
+
 plugins {
     id 'org.springframework.boot' version '2.2.4.RELEASE'
     id 'maven-publish'
-    id 'java'
+    id 'java-library'
 }
 
 apply plugin: 'java'
 apply plugin: 'io.spring.dependency-management'
 apply plugin: 'org.springframework.boot'
+apply plugin: 'com.jfrog.bintray'
+
+bintray {
+    user = System.getenv('BINTRAY_USER')
+    key = System.getenv('BINTRAY_KEY')
+    pkg {
+        repo = 'hltools'
+        name = 'imageapi'
+        userOrg = 'paulscherrerinstitute'
+        vcsUrl = 'https://github.com/paulscherrerinstitute/imageapi'
+        licenses = ['GPL-3.0']
+        version {
+            name = '0.0.2'
+            desc = 'imageapi'
+        }
+        publish = true
+    }
+    publications = ['bootJava']
+}
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -35,11 +63,6 @@ dependencies {
 jar { enabled = true }
 bootJar { classifier = 'all' }
 
-System.err.println("GITHUB_ACTOR:" + System.getenv("GITHUB_ACTOR"))
-System.err.println("GITHUB_TOKEN:" + System.getenv("GITHUB_TOKEN"))
-System.err.println("GH_TOKEN:" + System.getenv("GH_TOKEN"))
-System.err.println("PGITHUB_TOKEN:" + ghtoken)
-
 publishing {
     publications {
         bootJava(MavenPublication) {
@@ -48,18 +71,19 @@ publishing {
     }
     repositories {
         maven {
-            /*
-            url 'https://artifacts.psi.ch/artifactory/libs-snapshots-local'
+            name "psi"
+            url "https://artifacts.psi.ch/artifactory/libs-snapshots-local"
             credentials {
-                username = 'upload'
-                password = 'AP7pYDKfdXVWMnSQ'
+                username = "upload"
+                password = "AP7pYDKfdXVWMnSQ"
             }
-            193e7279c34c6695c5c8e8d37629e3441eb91efc
-            */
-            url 'https://maven.pkg.github.com/paulscherrerinstitute/imageapi'
+        }
+        maven {
+            name "ghci"
+            url "https://maven.pkg.github.com/paulscherrerinstitute/imageapi"
             credentials {
                 username = "paulscherrerinstitute"
-                password = ghtoken
+                password = project.properties["ghtoken"] ?: "empty"
             }
         }
     }

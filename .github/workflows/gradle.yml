@@ -4,14 +4,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: Show0
-      run: echo does echo work
-    - name: Show
-      run: echo 98324yv9387hyv9873ytcn34t >ght
-    - name: Show2
-      run: ls -lA
-    - name: Show3
-      run: cat ght
     - name: Checkout
       uses: actions/checkout@v2
     - name: Set up JDK 1.11
