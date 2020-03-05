@@ -1,12 +1,8 @@
 name: Java CI
-
 on: [push]
-
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v2
     - name: Set up JDK 1.11
@@ -17,3 +13,8 @@ jobs:
       run: chmod +x gradlew
     - name: Build with Gradle
       run: ./gradlew build
+    - name: Upload
+      uses: actions/upload-artifact@v1
+      with:
+        name: 1d8690130
+        path: build/libs
