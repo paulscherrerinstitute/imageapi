@@ -38,6 +38,7 @@ bootJar { classifier = 'all' }
 System.err.println("GITHUB_ACTOR:" + System.getenv("GITHUB_ACTOR"))
 System.err.println("GITHUB_TOKEN:" + System.getenv("GITHUB_TOKEN"))
 System.err.println("GH_TOKEN:" + System.getenv("GH_TOKEN"))
+System.err.println("PGITHUB_TOKEN:" + ghtoken)
 
 publishing {
     publications {
@@ -53,11 +54,12 @@ publishing {
                 username = 'upload'
                 password = 'AP7pYDKfdXVWMnSQ'
             }
+            193e7279c34c6695c5c8e8d37629e3441eb91efc
             */
             url 'https://maven.pkg.github.com/paulscherrerinstitute/imageapi'
             credentials {
-                username = System.getenv("GITHUB_ACTOR")
-                password = System.getenv("GITHUB_TOKEN")
+                username = "paulscherrerinstitute"
+                password = ghtoken
             }
         }
     }
