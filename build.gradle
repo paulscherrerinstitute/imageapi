@@ -11,12 +11,17 @@ plugins {
     id 'org.springframework.boot' version '2.2.4.RELEASE'
     id 'maven-publish'
     id 'java-library'
+    id 'jacoco'
 }
 
 apply plugin: 'java'
 apply plugin: 'io.spring.dependency-management'
 apply plugin: 'org.springframework.boot'
 apply plugin: 'com.jfrog.bintray'
+
+jacoco {
+    toolVersion = "0.8.5"
+}
 
 bintray {
     user = System.getenv('BINTRAY_USER')
@@ -62,6 +67,13 @@ dependencies {
 
 jar { enabled = true }
 bootJar { classifier = 'all' }
+
+jacocoTestReport {
+    reports {
+        xml.enabled true
+        html.enabled false
+    }
+}
 
 publishing {
     publications {
