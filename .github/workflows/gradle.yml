@@ -10,22 +10,7 @@ jobs:
       uses: actions/setup-java@v1
       with:
         java-version: 1.11
-    - name: Cache Gradle packages
-      uses: actions/cache@v1
-      with:
-        path: ~/.gradle/caches
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle') }}
-        restore-keys: ${{ runner.os }}-gradle
-    #- name: Make gradlew executable
-    #  run: chmod +x gradlew
     - name: Build
       run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} build
-    - name: Test
-      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} test
     - name: Publish
-      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} publish
-    - name: Save Package
-      uses: actions/upload-artifact@v1
-      with:
-        name: 1d8690130
-        path: build/libs
+      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} publishBootJavaPublicationToGhciRepository
