@@ -10,7 +10,7 @@ jobs:
       uses: actions/setup-java@v1
       with:
         java-version: 1.11
-    - name: Build
-      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} build
+    - name: Test
+      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} test
     - name: Publish
       run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} publishBootJavaPublicationToGhciRepository
