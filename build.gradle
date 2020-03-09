@@ -14,7 +14,7 @@ java {
 }
 
 group 'ch.psi.daq'
-version '0.0.2'
+version '0.0.2+0000'
 
 repositories {
     mavenCentral()
