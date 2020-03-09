@@ -1,3 +1,4 @@
+/*
 buildscript {
     repositories {
         jcenter()
@@ -6,18 +7,20 @@ buildscript {
         classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.+'
     }
 }
+*/
 
 plugins {
     id 'org.springframework.boot' version '2.2.4.RELEASE'
     id 'maven-publish'
-    id 'java-library'
+    id 'java'
 }
 
 apply plugin: 'java'
 apply plugin: 'io.spring.dependency-management'
 apply plugin: 'org.springframework.boot'
-apply plugin: 'com.jfrog.bintray'
+//apply plugin: 'com.jfrog.bintray'
 
+/*
 bintray {
     user = System.getenv('BINTRAY_USER')
     key = System.getenv('BINTRAY_KEY')
@@ -35,6 +38,7 @@ bintray {
     }
     publications = ['bootJava']
 }
+*/
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -63,7 +67,7 @@ dependencies {
 jar { enabled = true }
 bootJar { classifier = 'all' }
 
-System.err.println(project.properties["ghtoken"] ?: "empty")
+System.err.println("ghtoken: " + (project.properties["ghtoken"] ?: "empty"))
 
 publishing {
     publications {
