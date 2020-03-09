@@ -23,7 +23,7 @@ jobs:
     - name: Test
       run: ./gradlew test
     - name: Publish
-      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} publish
+      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} --scan publish
     - name: Save Package
       uses: actions/upload-artifact@v1
       with:
