@@ -1,5 +1,7 @@
 # Readme
 
+![Java CI](https://github.com/paulscherrerinstitute/imageapi/workflows/Java%20CI/badge.svg?branch=master)
+
 ## Deployment
 
 Systemd unit name: `imageapi`
