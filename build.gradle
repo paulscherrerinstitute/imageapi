@@ -63,8 +63,6 @@ dependencies {
 jar { enabled = true }
 bootJar { classifier = 'all' }
 
-System.err.println("ghtoken same: " + ((project.properties["ghtoken"] ?: "empty") == ghtoken))
-
 publishing {
     publications {
         bootJava(MavenPublication) {
