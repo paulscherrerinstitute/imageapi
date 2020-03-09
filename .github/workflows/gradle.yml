@@ -19,11 +19,11 @@ jobs:
     #- name: Make gradlew executable
     #  run: chmod +x gradlew
     - name: Build
-      run: ./gradlew bootJar
+      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} bootJar
     - name: Test
-      run: ./gradlew test
+      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} test
     - name: Publish
-      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} --debug publish
+      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} publish
     - name: Save Package
       uses: actions/upload-artifact@v1
       with:
