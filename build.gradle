@@ -47,7 +47,7 @@ java {
 }
 
 group 'ch.psi.daq'
-version '0.0.2+0001'
+version '0.0.3-aa.0000'
 
 repositories {
     mavenCentral()
@@ -58,10 +58,12 @@ dependencies {
     implementation 'ch.qos.logback:logback-classic:1.2.3'
     implementation 'org.springframework.boot:spring-boot-starter-webflux:2.2.4.RELEASE'
     implementation 'org.springframework.boot:spring-boot-starter-reactor-netty:2.2.4.RELEASE'
+    implementation 'org.springframework.boot:spring-boot-configuration-processor'
     implementation 'io.projectreactor.netty:reactor-netty:0.9.4.RELEASE'
     implementation 'com.google.guava:guava:28.2-jre'
     implementation group: 'ch.psi', name: 'bsread', version: '3.5.14'
     implementation group: 'org.junit.jupiter', name: 'junit-jupiter', version: '5.6.0'
+    testImplementation group: 'org.springframework.boot', name: 'spring-boot-starter-test', version: '2.2.4.RELEASE'
     testImplementation group: 'junit', name: 'junit', version: '4.12'
 }
 
@@ -70,8 +72,8 @@ bootJar { classifier = 'all' }
 
 jacocoTestReport {
     reports {
-        xml.enabled true
-        html.enabled false
+        xml.enabled (project.properties["covxml"] ? true : false)
+        html.enabled (project.properties["covxml"] ? false : true)
     }
 }
 
