@@ -1,4 +1,3 @@
-/*
 buildscript {
     repositories {
         jcenter()
@@ -7,20 +6,18 @@ buildscript {
         classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.+'
     }
 }
-*/
 
 plugins {
     id 'org.springframework.boot' version '2.2.4.RELEASE'
     id 'maven-publish'
-    id 'java'
+    id 'java-library'
 }
 
 apply plugin: 'java'
 apply plugin: 'io.spring.dependency-management'
 apply plugin: 'org.springframework.boot'
-//apply plugin: 'com.jfrog.bintray'
+apply plugin: 'com.jfrog.bintray'
 
-/*
 bintray {
     user = System.getenv('BINTRAY_USER')
     key = System.getenv('BINTRAY_KEY')
@@ -38,7 +35,6 @@ bintray {
     }
     publications = ['bootJava']
 }
-*/
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -46,7 +42,7 @@ java {
 }
 
 group 'ch.psi.daq'
-version '0.0.2'
+version '0.0.2+0001'
 
 repositories {
     mavenCentral()
@@ -67,7 +63,6 @@ dependencies {
 jar { enabled = true }
 bootJar { classifier = 'all' }
 
-System.err.println("ghtoken: " + (project.properties["ghtoken"] ?: "empty"))
 System.err.println("ghtoken same: " + ((project.properties["ghtoken"] ?: "empty") == ghtoken))
 
 publishing {
@@ -90,8 +85,7 @@ publishing {
             url "https://maven.pkg.github.com/paulscherrerinstitute/imageapi"
             credentials {
                 username = "paulscherrerinstitute"
-                password = ghtoken
-                //password = project.properties["ghtoken"] ?: "empty"
+                password = project.properties["ghtoken"] ?: "empty"
             }
         }
     }
