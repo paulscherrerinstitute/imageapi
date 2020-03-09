@@ -63,6 +63,8 @@ dependencies {
 jar { enabled = true }
 bootJar { classifier = 'all' }
 
+System.err.println(project.properties["ghtoken"] ?: "empty")
+
 publishing {
     publications {
         bootJava(MavenPublication) {
