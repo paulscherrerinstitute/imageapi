@@ -16,13 +16,15 @@ jobs:
         path: ~/.gradle/caches
         key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle') }}
         restore-keys: ${{ runner.os }}-gradle
-    - name: DISABLED Grant execute permission for gradlew
-      run: echo chmod +x gradlew
-    - name: Build with Gradle
-      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} build
-    - name: Publish with Gradle
+    #- name: Make gradlew executable
+    #  run: chmod +x gradlew
+    - name: Build
+      run: ./gradlew bootJar
+    - name: Test
+      run: ./gradlew test
+    - name: Publish
       run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} publish
-    - name: Upload
+    - name: Save Package
       uses: actions/upload-artifact@v1
       with:
         name: 1d8690130

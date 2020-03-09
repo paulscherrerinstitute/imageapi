@@ -29,7 +29,7 @@ public class TestIndex {
     @Test
     public void find5000() {
         byte[] tgt = BaseEncoding.base16().lowerCase().decode("15f065fb5804e173");
-        assertEquals(5000 * 16,
+        assertEquals(5001 * 16,
         monoTestIndex()
         .doOnNext(TestIndex::testCmp)
         .map(x -> Index.findGE(tgt, x))
