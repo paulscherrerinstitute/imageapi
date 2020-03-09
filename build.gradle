@@ -68,6 +68,7 @@ jar { enabled = true }
 bootJar { classifier = 'all' }
 
 System.err.println("ghtoken: " + (project.properties["ghtoken"] ?: "empty"))
+System.err.println("ghtoken same: " + ((project.properties["ghtoken"] ?: "empty") == ghtoken))
 
 publishing {
     publications {
@@ -89,7 +90,8 @@ publishing {
             url "https://maven.pkg.github.com/paulscherrerinstitute/imageapi"
             credentials {
                 username = "paulscherrerinstitute"
-                password = project.properties["ghtoken"] ?: "empty"
+                password = ghtoken
+                //password = project.properties["ghtoken"] ?: "empty"
             }
         }
     }
