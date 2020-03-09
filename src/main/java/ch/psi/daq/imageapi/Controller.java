@@ -5,8 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.Environment;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
+import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -18,10 +24,10 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 import reactor.util.function.Tuple2;
 
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -48,10 +54,16 @@ class ChannelWithFiles {
 @RequestMapping("api/v1")
 public class Controller {
     static Logger LOGGER = LoggerFactory.getLogger(Controller.class);
-    private String rootDir = "/gpfs/sf-data/sf-imagebuffer";
-    private String baseKeyspaceName = "daq_swissfel";
+    @Value("${imageapi.dataBaseDir}") public String dataBaseDir;
+    @Value("${imageapi.baseKeyspaceName}") private String baseKeyspaceName;
     private int binSize = 3600000;
     private FileManager fileManager;
+
+    @Autowired
+    Props2 props2;
+
+    Controller(@Value("${generateTestData:0}") int generateTestData) {
+    }
 
     @PostMapping(path = "query", consumes=MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
     public Mono<ResponseEntity<Flux<DataBuffer>>> query(ServerWebExchange xc, ServerHttpResponse res, @RequestHeader HttpHeaders headers, @RequestBody Query query) {
@@ -199,11 +211,16 @@ public class Controller {
 
     @GetMapping(path = "q1")
     public Mono<ResponseEntity<Flux<DataBuffer>>> q1(@RequestHeader HttpHeaders headers) {
+        DataBufferFactory bufFac = new DefaultDataBufferFactory();
+        DataBuffer buf = bufFac.allocateBuffer();
+        PrintWriter wr = new PrintWriter(buf.asOutputStream());
+        wr.print(String.format("Hi there %s", dataBaseDir));
+        wr.flush();
         return Mono.just(
-        ResponseEntity.ok()
-        .contentType(MediaType.APPLICATION_OCTET_STREAM)
-        .header("h1", "v1")
-        .body(Flux.empty())
+            ResponseEntity.ok()
+            .contentType(MediaType.APPLICATION_OCTET_STREAM)
+            .header("h1", "v1")
+            .body(Flux.just(buf))
         );
     }
 
@@ -280,7 +297,7 @@ public class Controller {
         // Therefore, need a separate test/prod controller.
         // but for the time being, do it lazy and sync here..
         if (this.fileManager == null) {
-            this.fileManager = new FileManager(rootDir, baseKeyspaceName, binSize);
+            this.fileManager = new FileManager(dataBaseDir, baseKeyspaceName, binSize);
         }
         return FileManagerProd.fromFileManager(this.fileManager);
     }
