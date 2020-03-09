@@ -11,6 +11,6 @@ jobs:
       with:
         java-version: 1.11
     - name: Test
-      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} test
+      run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} build
     - name: Publish
       run: ./gradlew -Pghtoken=${{ secrets.GITHUB_TOKEN }} publishBootJavaPublicationToGhciRepository
