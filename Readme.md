@@ -1,6 +1,7 @@
 # Readme
 
 ![Java CI](https://github.com/paulscherrerinstitute/imageapi/workflows/Java%20CI/badge.svg?branch=master)
+[![codecov](https://codecov.io/gh/paulscherrerinstitute/imageapi/branch/master/graph/badge.svg)](https://codecov.io/gh/paulscherrerinstitute/imageapi)
 
 ## Deployment
 
