@@ -61,7 +61,7 @@ public class Utils {
             SeekToBeginResult res = Utils.seekToBegin(c, begin);
             if (!res.isOk()) { throw new RuntimeException("Could not seek.  TODO handle this more gracefully."); }
             LOGGER.debug("lengthOfFirstBlob: {}", res.lengthOfFirstBlob());
-            return PositionedDatafile.fromChannel(c, path, -1);
+            return PositionedDatafile.fromChannel(c, path);
         })
         .subscribeOn(Schedulers.boundedElastic());
     }
