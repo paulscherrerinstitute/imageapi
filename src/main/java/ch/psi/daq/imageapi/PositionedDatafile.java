@@ -27,7 +27,6 @@ public class PositionedDatafile {
     final SeekableByteChannel channel;
     Path path;
     final long originalPosition;
-    Mono<Optional<Blob>> nextBlobMono;
     ArrayList<Integer> blockInstants = new ArrayList<>();
     ArrayList<Integer> blockDurationsMicros = new ArrayList<>();
     long threadId;
@@ -46,10 +45,7 @@ public class PositionedDatafile {
      */
     public static PositionedDatafile fromChannel(SeekableByteChannel channel, Path path, long threadId) {
         try {
-            PositionedDatafile x = new PositionedDatafile(channel, path, threadId);
-            // TODO make sure that this is actually dispatched already here in the background.
-            x.nextBlobMono = x.lengthOfNextBlob().flatMap(x::nextBlob).subscribeOn(Schedulers.boundedElastic());
-            return x;
+            return new PositionedDatafile(channel, path, threadId);
         }
         catch (IOException e) {
             LOGGER.error("IOException while getting original position");
@@ -149,31 +145,6 @@ public class PositionedDatafile {
                 }
             }
         });
-    }
-
-    public Optional<Blob> getNext() {
-        //LOGGER.info("PositionedDataFile getNext blocking on thread: {}", Thread.currentThread().getName());
-        long t1 = System.nanoTime();
-        Optional<Blob> blob = nextBlobMono.block();
-        long t2 = System.nanoTime();
-        long dt = t2 - t1;
-        if (blockInstants.size() < 1000000) {
-            dt /= 1000;
-            if (dt > Integer.MAX_VALUE) {
-                dt = Integer.MAX_VALUE;
-            }
-            blockInstants.add((int) (t1 / 1000000000));
-            blockDurationsMicros.add((int) dt);
-        }
-        if (blob != null && blob.isPresent()) {
-            if (blob.get().lengthNextBlob > 0) {
-                nextBlobMono = nextBlob(blob.get().lengthNextBlob).subscribeOn(Schedulers.boundedElastic());
-            }
-            else {
-                nextBlobMono = Mono.just(Optional.empty());
-            }
-        }
-        return blob;
     }
 
 }
