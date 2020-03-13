@@ -190,4 +190,24 @@ public class TestDataBuffer {
         assertEquals(255, a);
     }
 
+    @Test
+    public void getFromIndexIndependentOnPosition() {
+        ByteBuffer buf = ByteBuffer.allocate(1024);
+        assertEquals(0, buf.position());
+        buf.put((byte) 0x7a);
+        assertEquals(1, buf.position());
+        buf.put((byte) 0x7b);
+        assertEquals(2, buf.position());
+        buf.put((byte) 0x7c);
+        assertEquals(3, buf.position());
+        buf.put((byte) 0x7d);
+        assertEquals(4, buf.position());
+        buf.flip();
+        assertEquals(0, buf.position());
+        assertEquals(0x7a, buf.get());
+        assertEquals(0x7b, buf.get());
+        assertEquals(2, buf.position());
+        assertEquals(0x7a, buf.get(0));
+    }
+
 }
