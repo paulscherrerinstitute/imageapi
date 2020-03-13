@@ -58,6 +58,7 @@ public class Controller {
     @Value("${imageapi.baseKeyspaceName}") private String baseKeyspaceName;
     private int binSize = 3600000;
     private FileManager fileManager;
+    public int bufferSize = 512 * 1024;
 
     @Autowired
     Props2 props2;
@@ -120,7 +121,7 @@ public class Controller {
             return Mono.just(channelName).zipWith(Utils.matchingDataFiles(fileManager, channelName, begin, end));
         }, 1)
         .map(ChannelWithFiles::fromTuple)
-        .flatMapSequential(channelWithFiles -> eventStreamMethod.bufferFluxFromFiles(channelWithFiles, requestStats, beginNano, endNano), 1)
+        .flatMapSequential(channelWithFiles -> eventStreamMethod.bufferFluxFromFiles(channelWithFiles, requestStats, beginNano, endNano, bufferSize), 1)
         .doOnComplete(() -> {
             requestStats.endNow();
             LOGGER.info(toJsonString(requestStats));

@@ -35,7 +35,7 @@ public class ChannelEventStream {
         buf.writePosition(buf.writePosition() - 1);
     }
 
-    public Flux<DataBuffer> bufferFluxFromFiles(ChannelWithFiles channelWithFiles, RequestStats requestStats, long beginNano, long endNano) {
+    public Flux<DataBuffer> bufferFluxFromFiles(ChannelWithFiles channelWithFiles, RequestStats requestStats, long beginNano, long endNano, int bufferSize) {
         requestStats.locateDataFiles = channelWithFiles.files.duration;
         List<List<Path>> listOverBins = channelWithFiles.files.list;
         EventDataVectoredPostProcess pp = new EventDataVectoredPostProcess(channelWithFiles, requestStats);
@@ -69,7 +69,7 @@ public class ChannelEventStream {
             }
             return PositionedDataBufferFlux.create(
             channelIndexed.getT2().channel,
-            DataBufferUtils.readByteChannel(() -> channelIndexed.getT2().channel, bufFac, 1 * 1024 * 1024),
+            DataBufferUtils.readByteChannel(() -> channelIndexed.getT2().channel, bufFac, bufferSize),
             channelIndexed.getT1().intValue(),
             pos
             );
