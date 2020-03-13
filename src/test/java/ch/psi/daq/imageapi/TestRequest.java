@@ -43,8 +43,34 @@ public class TestRequest {
     @Autowired
     private WebTestClient client;
 
+    @Autowired
+    private Controller ctrl;
+
     @BeforeClass
     public static void beforeClass() {
+    }
+
+    class TimestampGenerator {
+        Random rng;
+        long ts;
+        long tsEnd;
+        int off;
+        TimestampGenerator(long ts, long tsEnd) {
+            this.ts = ts;
+            this.tsEnd = tsEnd;
+            rng = new Random(ts);
+            this.off = rng.nextInt(0xfff);
+        }
+        public void advance() {
+            ts += 2L * 60 * 1000 * 1000 * 1000;
+            this.off = rng.nextInt(0xffff);
+        }
+        public int bin() {
+            return (int) (ts() / (3600L * 1000 * 1000 * 1000));
+        }
+        public long ts() {
+            return ts + off;
+        }
     }
 
     /*
@@ -52,10 +78,10 @@ public class TestRequest {
     */
     void writeChunk(SeekableByteChannel wrData, SeekableByteChannel wrIndex, ByteBuffer buf, long ts, long pulse) throws IOException {
         Random rng = new Random(pulse);
-        int valueLen = 22 + 0 * ((rng.nextInt() >> 14) & 0xfffffffc);
+        int valueLen = 4000 + rng.nextInt(3000);
         rng.setSeed(pulse);
         long ttl = 42;
-        long iocTime = ts;
+        long iocTime = ts + 1;
         byte status = 0;
         byte severity = 0;
         int optionalFieldsLength = -1;
@@ -96,7 +122,7 @@ public class TestRequest {
         buf.clear();
     }
 
-    void writeData(SeekableByteChannel wrData, SeekableByteChannel wrIndex, String name, int bin, int split) throws IOException {
+    void writeData(SeekableByteChannel wrData, SeekableByteChannel wrIndex, String name, int bin, int split, TimestampGenerator tsgen) throws IOException {
         ByteBuffer buf = ByteBuffer.allocate(2<<22);
         buf.putShort((short)0);
         ByteBuffer nameEnc = StandardCharsets.UTF_8.encode(name);
@@ -112,24 +138,21 @@ public class TestRequest {
         buf.flip();
         wrIndex.write(buf);
 
-        long binL = (long) bin;
-        long tsBeg = (binL + 0) * 3600 * 1000 * 1000 * 1000 + 0x010203;
-        long tsEnd = (binL + 1) * 3600 * 1000 * 1000 * 1000;
-
         buf.clear();
-        for (long ts = tsBeg; ts < tsEnd; ts += 2L * 60 * 1000 * 1000 * 1000) {
-            writeChunk(wrData, wrIndex, buf, ts, ts + 13);
+        while (tsgen.bin() == bin) {
+            writeChunk(wrData, wrIndex, buf, tsgen.ts(), tsgen.ts() + 13);
+            tsgen.advance();
         }
     }
 
-    void createSplit(Path path, String name, int bin, int split) throws IOException {
+    void createSplit(Path path, String name, int bin, int split, TimestampGenerator tsgen) throws IOException {
         Path path2 = path.resolve(String.format("%010d", split));
         Path path3 = path2.resolve(String.format("%019d_%05d_Data", 3600 * 1000, 0));
         Path path4 = path2.resolve(String.format("%019d_%05d_Data_Index", 3600 * 1000, 0));
         Files.createDirectories(path2);
         SeekableByteChannel wrData = Files.newByteChannel(path3, EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING));
         SeekableByteChannel wrIndex = Files.newByteChannel(path4, EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING));
-        writeData(wrData, wrIndex, name, bin, split);
+        writeData(wrData, wrIndex, name, bin, split, tsgen);
         wrData.close();
         wrIndex.close();
     }
@@ -137,18 +160,18 @@ public class TestRequest {
     void createBin(Path path, String name, int bin) throws IOException {
         Path path2 = path.resolve(String.format("%019d", bin));
         Files.createDirectories(path2);
-        for (int i1 = 0; i1 < 4; i1++) {
-            createSplit(path2, name, bin, i1);
+        for (int split = 0; split < 4; split++) {
+            TimestampGenerator tsgen = new TimestampGenerator(((long)bin) * 3600 * 1000 * 1000 * 1000 + (split << 16), ((long)bin+1) * 3600 * 1000 * 1000 * 1000);
+            createSplit(path2, name, bin, split, tsgen);
         }
     }
 
     void createChannel(Path path, String name) throws IOException {
         Path path2 = path.resolve(name);
         Files.createDirectories(path2);
-        createBin(path2, name, 440000);
-        createBin(path2, name, 440001);
-        createBin(path2, name, 440002);
-        createBin(path2, name, 440003);
+        for (int bin = 440000; bin < 440004; bin += 1) {
+            createBin(path2, name, bin);
+        }
     }
 
     void setupData() throws IOException {
@@ -194,10 +217,29 @@ public class TestRequest {
         });
     }
 
+    void parseQueryResponse(DataBuffer buf) {
+        ByteBuffer bb = buf.asByteBuffer();
+        int len0 = bb.getInt(0);
+        assertTrue(1024 > len0);
+        int pos = 2 * Integer.BYTES + len0;
+        while (pos < bb.limit()) {
+            int len = bb.getInt(pos);
+            assertTrue(20000 > len);
+            assertEquals(1, bb.get(pos + Integer.BYTES));
+            long ts = bb.getLong(pos + Integer.BYTES + Byte.BYTES);
+            long pulse = bb.getLong(pos + Integer.BYTES + Byte.BYTES + Long.BYTES);
+            long bin = ts / (3600L * 1000 * 1000 * 1000);
+            assertTrue(440001 <= bin);
+            assertTrue(440002 > bin);
+            pos += 2 * Integer.BYTES + len;
+        }
+    }
+
     @Test
     public void queryData() throws IOException {
         // TODO do only once
         setupData();
+        ctrl.bufferSize = 17;
         client.post().uri("/api/v1/query")
         .contentType(MediaType.APPLICATION_JSON)
         .bodyValue("{\"channels\":[\"chn002\"], \"range\": {\"type\":\"date\", \"startDate\":\"2020-03-12T09:10:00Z\", \"endDate\":\"2020-03-12T09:20:00Z\"}}")
@@ -206,8 +248,7 @@ public class TestRequest {
         .expectBody(DataBuffer.class)
         .value(x -> {
             assertNotNull(x);
-            assertTrue(500 < x.readableByteCount());
-            assertTrue(20000 > x.readableByteCount());
+            parseQueryResponse(x);
         });
     }
 
