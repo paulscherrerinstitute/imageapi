@@ -62,7 +62,7 @@ public class TestRequest {
             this.off = rng.nextInt(0xfff);
         }
         public void advance() {
-            ts += 2L * 60 * 1000 * 1000 * 1000;
+            ts += 20L * 1000 * 1000 * 1000;
             this.off = rng.nextInt(0xffff);
         }
         public int bin() {
@@ -78,7 +78,7 @@ public class TestRequest {
     */
     void writeChunk(SeekableByteChannel wrData, SeekableByteChannel wrIndex, ByteBuffer buf, long ts, long pulse) throws IOException {
         Random rng = new Random(pulse);
-        int valueLen = 4000 + rng.nextInt(3000);
+        int valueLen = 400 + rng.nextInt(300);
         rng.setSeed(pulse);
         long ttl = 42;
         long iocTime = ts + 1;
@@ -217,8 +217,7 @@ public class TestRequest {
         });
     }
 
-    void parseQueryResponse(DataBuffer buf) {
-        ByteBuffer bb = buf.asByteBuffer();
+    void parseQueryResponse(ByteBuffer bb) {
         int len0 = bb.getInt(0);
         assertTrue(1024 > len0);
         int pos = 2 * Integer.BYTES + len0;
@@ -231,6 +230,8 @@ public class TestRequest {
             long bin = ts / (3600L * 1000 * 1000 * 1000);
             assertTrue(440001 <= bin);
             assertTrue(440002 > bin);
+            assertTrue((440001L * 3600 + 10 * 60) * 1000 * 1000 * 1000 <= ts);
+            assertTrue((440001L * 3600 + 20 * 60) * 1000 * 1000 * 1000 >  ts);
             pos += 2 * Integer.BYTES + len;
         }
     }
@@ -245,7 +246,7 @@ public class TestRequest {
         .bodyValue("{\"channels\":[\"chn002\"], \"range\": {\"type\":\"date\", \"startDate\":\"2020-03-12T09:10:00Z\", \"endDate\":\"2020-03-12T09:20:00Z\"}}")
         .exchange()
         .expectStatus().isOk()
-        .expectBody(DataBuffer.class)
+        .expectBody(ByteBuffer.class)
         .value(x -> {
             assertNotNull(x);
             parseQueryResponse(x);
