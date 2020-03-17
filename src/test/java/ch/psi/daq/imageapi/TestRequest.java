@@ -229,7 +229,7 @@ public class TestRequest {
             long pulse = bb.getLong(pos + Integer.BYTES + Byte.BYTES + Long.BYTES);
             long bin = ts / (3600L * 1000 * 1000 * 1000);
             assertTrue(440001 <= bin);
-            assertTrue(440002 > bin);
+            assertTrue(440002 >  bin);
             assertTrue((440001L * 3600 + 10 * 60) * 1000 * 1000 * 1000 <= ts);
             assertTrue((440001L * 3600 + 20 * 60) * 1000 * 1000 * 1000 >  ts);
             pos += 2 * Integer.BYTES + len;
