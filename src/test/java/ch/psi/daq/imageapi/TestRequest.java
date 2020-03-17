@@ -166,12 +166,17 @@ public class TestRequest {
         }
     }
 
+    void createConfig(Path path, String name) throws IOException {
+        Files.createDirectories(path);
+        Files.newByteChannel(path.resolve("00000_Config"), EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING));
+
+    }
+
     void createChannel(Path path, String name) throws IOException {
         Path path2 = path.resolve(name);
         Files.createDirectories(path2);
         Path pathConfig = Path.of(dataBaseDir).resolve(baseKeyspaceName).resolve("config").resolve(name).resolve("latest");
-        Files.createDirectories(pathConfig);
-        Files.newByteChannel(pathConfig.resolve("00000_Config"), EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING));
+        createConfig(pathConfig, name);
         for (int bin = 440000; bin < 440004; bin += 1) {
             createBin(path2, name, bin);
         }
@@ -210,7 +215,7 @@ public class TestRequest {
     @Test
     public void channelInfo() throws IOException {
         setupData();
-        Set<String> expect = Set.of("chn002", "chn003");
+        TestChannelConfig.createTestConfigEmpty(Path.of(dataBaseDir, baseKeyspaceName, "config", "chn002", "latest", "00000_Config"), "chn002");
         client.get().uri("/api/v1/channel/chn002")
         .exchange()
         .expectStatus().isOk()
@@ -218,15 +223,6 @@ public class TestRequest {
         .value(x -> {
             assertNotNull(x);
             String s = x.toString(StandardCharsets.UTF_8);
-            ObjectReader or = new ObjectMapper().readerFor(String[].class);
-            try {
-                List<String> l1 = Arrays.asList(or.readValue(s));
-                Set<String> set1 = Set.copyOf(l1);
-                assertEquals(expect, set1);
-            }
-            catch (JsonProcessingException e) {
-                throw new RuntimeException(e);
-            }
         });
     }
 
