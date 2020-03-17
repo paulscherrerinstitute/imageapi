@@ -5,9 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
-import reactor.netty.ByteBufFlux;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -105,60 +103,21 @@ public class Index {
 
     static Mono<byte[]> openIndex(Path indexPath) {
         return Mono.fromCallable(() -> {
-            try {
-                byte[] b1 = Files.readAllBytes(indexPath);
-                int n = b1.length;
-                //LOGGER.info(String.format("reading index 2nd  n: %d  %s", n, indexPath));
-                if (n < 2) {
-                    throw new RuntimeException(String.format("Index file is too small n: %d  %s", n, indexPath));
-                }
-                if ((n-2) % N != 0) {
-                    throw new RuntimeException(String.format("unexpected index file content  n: %d  %s", n, indexPath));
-                }
-                byte[] b2 = Arrays.copyOfRange(b1, 2, n);
-                int n2 = b2.length;
-                if (n2 < 2) {
-                    throw new RuntimeException(String.format("Index file is too small n: %d  n2: %d  %s", n, n2, indexPath));
-                }
-                if (n2 % N != 0) {
-                    throw new RuntimeException(String.format("unexpected index file content  n: %d  n2: %d  %s", n, n2, indexPath));
-                }
-                return b2;
+            long fileSize = Files.size(indexPath);
+            if (fileSize > 2 + 30 * 1024 * 1024) {
+                throw new RuntimeException(String.format("Index file is too large: %d", fileSize));
             }
-            catch (IOException e) {
-                LOGGER.error("IOException readAllBytes", e);
+            byte[] b1 = Files.readAllBytes(indexPath);
+            int n = b1.length;
+            if (n < 2) {
+                throw new RuntimeException(String.format("Index file is too small n: %d  %s", n, indexPath));
             }
-            catch (OutOfMemoryError e) {
-                LOGGER.error("OutOfMemoryError readAllBytes", e);
+            if ((n-2) % N != 0) {
+                throw new RuntimeException(String.format("unexpected index file content  n: %d  %s", n, indexPath));
             }
-            catch (SecurityException e) {
-                LOGGER.error("SecurityException readAllBytes", e);
-            }
-            throw new RuntimeException("can not read index");
+            return Arrays.copyOfRange(b1, 2, n);
         })
         .subscribeOn(Schedulers.parallel());
-    }
-
-    static Mono<byte[]> openIndexVersion2(Path indexPath) {
-        return ByteBufFlux.fromPath(indexPath)
-        .aggregate()
-        .map(buf -> {
-            long nLong = buf.readableBytes();
-            if (nLong < 2) {
-                throw new RuntimeException(String.format("Index file is too small %s", indexPath));
-            }
-            if (nLong >= Integer.MAX_VALUE) {
-                throw new RuntimeException(String.format("nLong >= Integer.MAX_VALUE  %s", indexPath));
-            }
-            int n = (int) nLong;
-            if ((n-2) % N != 0) {
-                throw new RuntimeException(String.format("unexpected index file content  %s", indexPath));
-            }
-            n = n - 2;
-            byte[] a = new byte[n];
-            buf.getBytes(2, a);
-            return a;
-        });
     }
 
     static long valueLongAt(byte[] a, int i) {
