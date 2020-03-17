@@ -169,6 +169,9 @@ public class TestRequest {
     void createChannel(Path path, String name) throws IOException {
         Path path2 = path.resolve(name);
         Files.createDirectories(path2);
+        Path pathConfig = Path.of(dataBaseDir).resolve(baseKeyspaceName).resolve("config").resolve(name).resolve("latest");
+        Files.createDirectories(pathConfig);
+        Files.newByteChannel(pathConfig.resolve("00000_Config"), EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING));
         for (int bin = 440000; bin < 440004; bin += 1) {
             createBin(path2, name, bin);
         }
@@ -182,23 +185,33 @@ public class TestRequest {
     }
 
     @Test
-    public void contactHost() throws IOException {
+    public void searchChannel() throws IOException {
         setupData();
-        client.get().uri("/api/v1/q1")
+        Set<String> expect = Set.of("chn002", "chn003");
+        client.get().uri("/api/v1/channels?regex=.*")
         .exchange()
         .expectStatus().isOk()
         .expectBody(DataBuffer.class)
         .value(x -> {
             assertNotNull(x);
-            assertEquals(String.format("Hi there %s", dataBaseDir), x.toString(StandardCharsets.UTF_8));
+            String s = x.toString(StandardCharsets.UTF_8);
+            ObjectReader or = new ObjectMapper().readerFor(String[].class);
+            try {
+                List<String> l1 = Arrays.asList(or.readValue(s));
+                Set<String> set1 = Set.copyOf(l1);
+                assertEquals(expect, set1);
+            }
+            catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
+            }
         });
     }
 
     @Test
-    public void searchChannel() throws IOException {
+    public void channelInfo() throws IOException {
         setupData();
         Set<String> expect = Set.of("chn002", "chn003");
-        client.get().uri("/api/v1/channels?regex=.*")
+        client.get().uri("/api/v1/channel/chn002")
         .exchange()
         .expectStatus().isOk()
         .expectBody(DataBuffer.class)
