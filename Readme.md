@@ -19,6 +19,6 @@ gradle bootJar
 
 ## Publish to Bintray
 
-```java
+```bash
 gradle bintrayPublish
 ```
