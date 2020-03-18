@@ -85,13 +85,7 @@ public class Controller {
             throw new IllegalArgumentException(String.format("Can not parse request"));
         }
 
-        IFileManager fileManager;
-        if (query.getChannels().contains("test01") || headers.containsKey("x-use-test-filemanager")) {
-            fileManager = new FileManagerTest();
-        }
-        else {
-            fileManager = filemanagerProduction();
-        }
+        IFileManager fileManager = filemanagerProduction();
 
         final ChannelEventStream eventStreamMethod = new ChannelEventStream(res.bufferFactory());
 
@@ -152,13 +146,7 @@ public class Controller {
             throw new IllegalArgumentException("Can not parse request");
         }
 
-        IFileManager fileManager;
-        if (query.getChannels().contains("test01") || headers.containsKey("x-use-test-filemanager")) {
-            fileManager = new FileManagerTest();
-        }
-        else {
-            fileManager = filemanagerProduction();
-        }
+        IFileManager fileManager = filemanagerProduction();
 
         final ChannelEventStream eventStreamMethod = new ChannelEventStream(res.bufferFactory());
 
@@ -208,55 +196,6 @@ public class Controller {
         catch (JsonProcessingException e) {
             return "";
         }
-    }
-
-    @GetMapping(path = "q1")
-    public Mono<ResponseEntity<Flux<DataBuffer>>> q1(@RequestHeader HttpHeaders headers) {
-        DataBufferFactory bufFac = new DefaultDataBufferFactory();
-        DataBuffer buf = bufFac.allocateBuffer();
-        PrintWriter wr = new PrintWriter(buf.asOutputStream());
-        wr.print(String.format("Hi there %s", dataBaseDir));
-        wr.flush();
-        return Mono.just(
-            ResponseEntity.ok()
-            .contentType(MediaType.APPLICATION_OCTET_STREAM)
-            .header("h1", "v1")
-            .body(Flux.just(buf))
-        );
-    }
-
-    @GetMapping(path = "q2", produces = MediaType.APPLICATION_JSON_VALUE)
-    public Mono<ResponseEntity<String>> q2_json(@RequestHeader HttpHeaders headers) {
-        return Mono.just(
-        ResponseEntity.ok()
-        .contentType(MediaType.APPLICATION_JSON)
-        .body("{\"answer\":\"ok, json produced\"}")
-        );
-    }
-
-    @GetMapping(path = "q2", produces = MediaType.TEXT_MARKDOWN_VALUE)
-    public Mono<ResponseEntity<String>> q2_md(@RequestHeader HttpHeaders headers, ServerHttpRequest req) {
-        return Mono.just(
-        ResponseEntity.ok()
-        .contentType(MediaType.TEXT_MARKDOWN)
-        .body("# Title\n\nMarkdown content.\n")
-        );
-    }
-
-    @GetMapping(path = "q2")
-    public Mono<ResponseEntity<String>> q2_fallback() {
-        return Mono.just(
-        ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).build()
-        );
-    }
-
-    @GetMapping(path = "q3", produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
-    public Mono<ResponseEntity<Flux<DataBuffer>>> q3(ServerHttpResponse res, @RequestHeader HttpHeaders headers) {
-        DataBufferFactory bufFac = res.bufferFactory();
-        ByteBuffer buf2 = Utils.allocateByteBuffer(1024);
-        buf2.put(new byte[] {0x61, 0x62, 0x63, 0x0a});
-        buf2.flip();
-        return Mono.just(ResponseEntity.ok().body(Flux.just(bufFac.wrap(buf2))));
     }
 
     @ExceptionHandler
