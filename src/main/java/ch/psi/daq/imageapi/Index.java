@@ -12,7 +12,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 
 public class Index {
-    static Logger LOGGER = LoggerFactory.getLogger(Index.class);
+    static Logger LOGGER = LoggerFactory.getLogger("Index");
     static final int N = 16;
 
     static class FindResult {

@@ -19,10 +19,4 @@ public class Main implements ApplicationRunner {
         SpringApplication.run(Main.class, args);
     }
 
-    public static void main_manual(final String[] args) {
-        new SpringApplicationBuilder(Main.class)
-        .web(WebApplicationType.REACTIVE)
-        .run(args);
-    }
-
 }
