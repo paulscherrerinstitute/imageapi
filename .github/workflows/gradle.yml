@@ -14,10 +14,15 @@ jobs:
       run: ./gradlew bootJar
     - name: Test
       run: ./gradlew -Pcovxml=true test
-    - name: Report
-      run: ./gradlew -Pcovxml=true jacocoTestReport
-    - name: Code coverage
-      uses: codecov/codecov-action@v1
-      with:
-        file: ./build/reports/jacoco/test/jacocoTestReport.xml
-        fail_ci_if_error: true
+    #- name: Report
+    #  run: ./gradlew -Pcovxml=true jacocoTestReport
+    #- name: Code coverage
+    #  uses: codecov/codecov-action@v1
+    #  with:
+    #    file: ./build/reports/jacoco/test/jacocoTestReport.xml
+    #    fail_ci_if_error: true
+    - name: Publish to GitHub Packages
+      run: ./gradlew publish
+      env:
+        GITHUB_ACTOR: ${{ secrets.GITHUB_ACTOR }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
