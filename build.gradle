@@ -8,11 +8,13 @@ buildscript {
 }
 
 plugins {
-    id 'org.springframework.boot' version '2.2.4.RELEASE'
+    id 'org.springframework.boot' version '2.3.1.RELEASE'
     id 'maven-publish'
     id 'java-library'
     id 'jacoco'
 }
+
+def springBootVersion = '2.3.1.RELEASE'
 
 apply plugin: 'java'
 apply plugin: 'io.spring.dependency-management'
@@ -29,7 +31,7 @@ java {
 }
 
 group 'ch.psi.daq'
-version '0.0.3-aa.0071'
+version '0.0.4-aa.0024'
 
 bintray {
     user = System.getenv('BINTRAY_USER')
@@ -55,21 +57,20 @@ repositories {
 
 dependencies {
     implementation 'ch.qos.logback:logback-classic:1.2.3'
-    implementation 'org.springframework.boot:spring-boot-starter-webflux:2.2.4.RELEASE'
-    implementation 'org.springframework.boot:spring-boot-starter-reactor-netty:2.2.4.RELEASE'
-    implementation 'org.springframework.boot:spring-boot-configuration-processor'
-    implementation 'io.projectreactor.netty:reactor-netty:0.9.4.RELEASE'
-    implementation 'com.google.guava:guava:28.2-jre'
+    implementation 'org.springframework.boot:spring-boot-starter-webflux:'+springBootVersion
+    implementation 'org.springframework.boot:spring-boot-starter-reactor-netty:'+springBootVersion
+    implementation 'org.springframework.boot:spring-boot-configuration-processor:'+springBootVersion
+    testImplementation group: 'org.springframework.boot', name: 'spring-boot-starter-test', version: springBootVersion
+    implementation 'org.springframework.boot:spring-boot-configuration-processor:'+springBootVersion
+    implementation 'com.google.guava:guava:29.0-jre'
+    implementation 'io.projectreactor.netty:reactor-netty:0.9.9.RELEASE'
     implementation group: 'ch.psi', name: 'bsread', version: '3.5.14'
     implementation group: 'ch.psi', name: 'bitshuffle-lz4', version: '1.1.2'
     implementation group: 'org.junit.jupiter', name: 'junit-jupiter', version: '5.6.0'
-    //implementation group: 'io.swagger.core.v3', name: 'swagger-annotations', version: '2.1.1'
-    implementation group: 'io.swagger', name: 'swagger-annotations', version: '1.6.0'
     implementation group: 'org.openapitools', name: 'jackson-databind-nullable', version: '0.2.1'
     implementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-cbor', version: '2.10.3'
     implementation group: 'org.xerial.snappy', name: 'snappy-java', version: '1.1.7.4'
     implementation group: 'org.lz4', name: 'lz4-java', version: '1.7.1'
-    testImplementation group: 'org.springframework.boot', name: 'spring-boot-starter-test', version: '2.2.4.RELEASE'
     testImplementation group: 'junit', name: 'junit', version: '4.12'
 }
 
@@ -90,30 +91,12 @@ publishing {
         }
     }
     repositories {
-        /*
         maven {
             name "psi"
             url "https://artifacts.psi.ch/artifactory/libs-snapshots-local"
             credentials {
                 username = "upload"
                 password = "AP7pYDKfdXVWMnSQ"
-            }
-        }
-        maven {
-            name "ghci"
-            url "https://maven.pkg.github.com/paulscherrerinstitute/imageapi"
-            credentials {
-                username = "paulscherrerinstitute"
-                password = project.properties["ghtoken"] ?: "empty"
-            }
-        }
-        */
-        maven {
-            name = "GitHubPackages"
-            url = "https://maven.pkg.github.com/paulscherrerinstitute/imageapi"
-            credentials {
-                username = System.getenv("GITHUB_ACTOR")
-                password = System.getenv("GITHUB_TOKEN")
             }
         }
     }

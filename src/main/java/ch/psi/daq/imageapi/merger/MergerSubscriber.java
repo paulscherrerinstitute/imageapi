@@ -191,7 +191,13 @@ public class MergerSubscriber implements Subscriber<Item> {
         synchronized (merger) {
             LOGGER.info("cancel");
             state = State.Terminated;
-            sub.cancel();
+            if (sub != null) {
+                sub.cancel();
+                sub = null;
+            }
+            else {
+                LOGGER.warn("cancel even though never active");
+            }
             LOGGER.info("cancel RETURN");
         }
     }

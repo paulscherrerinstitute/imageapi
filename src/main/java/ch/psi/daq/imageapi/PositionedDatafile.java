@@ -175,7 +175,7 @@ public class PositionedDatafile {
             })
             .map(x -> Tuples.of(x.getT1(), Path.of(x.getT2())))
             .index()
-            .flatMapSequential(x -> {
+            .concatMap(x -> {
                 long fileId = x.getT1();
                 Path path = x.getT2().getT2();
                 if (x.getT2().getT1().hasIndex) {
@@ -184,7 +184,7 @@ public class PositionedDatafile {
                 else {
                     return PositionedDatafile.openAndPositionNoIndex(path, beginNanos);
                 }
-            }, 1);
+            });
         })
         .collectList();
         return ret;
@@ -194,6 +194,18 @@ public class PositionedDatafile {
         SeekableByteChannel c = channel;
         channel = null;
         return c;
+    }
+
+    public void release() {
+        if (channel != null) {
+            try {
+                channel.close();
+            }
+            catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            channel = null;
+        }
     }
 
 }

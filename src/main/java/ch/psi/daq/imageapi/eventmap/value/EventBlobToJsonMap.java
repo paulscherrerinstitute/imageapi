@@ -2,12 +2,15 @@ package ch.psi.daq.imageapi.eventmap.value;
 
 import ch.psi.bitshuffle.BitShuffleLZ4JNIDecompressor;
 import ch.psi.daq.imageapi.DTypeBitmapUtils;
+import ch.psi.daq.imageapi.EventDataType;
 import ch.qos.logback.classic.Level;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonValue;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.LongNode;
 import net.jpountz.lz4.LZ4Factory;
 import ch.qos.logback.classic.Logger;
 import org.reactivestreams.Publisher;
@@ -22,17 +25,20 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
-public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult> {
-    static Logger LOGGER = (Logger) LoggerFactory.getLogger("EventBlobToV1Map");
+import static ch.psi.daq.imageapi.EventDataType.*;
+
+public class EventBlobToJsonMap implements Function<DataBuffer, MapJsonResult> {
+    static Logger LOGGER = (Logger) LoggerFactory.getLogger("EventBlobToJsonMap");
     static {
-        LOGGER.setLevel(Level.INFO);
+        //LOGGER.setLevel(Level.INFO);
     }
     static final int HEADER_A_LEN = 2 * Integer.BYTES + 4 * Long.BYTES + 2 * Byte.BYTES;
     DataBufferFactory bufFac;
-    DataBuffer cbuf;
     DataBuffer kbuf;
     DataBuffer left;
     boolean headerOut;
@@ -57,10 +63,7 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
     int headerLength;
     int optionalFieldsLength;
     long endNanos;
-    boolean unpackOnServer;
-    boolean blobUnpack;
     long limitBytes;
-    long writtenBytes;
     long seenHeaderA;
     boolean doTrace = false;
 
@@ -89,45 +92,43 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
         public List<Integer> shape;
     }
 
-    public EventBlobToV1Map(String channelName, long endNanos, DataBufferFactory bufFac, int bufferSize, boolean unpackOnServer, long limitBytes) {
+    public EventBlobToJsonMap(String channelName, long endNanos, DataBufferFactory bufFac, int bufferSize, long limitBytes) {
         this.channelName = channelName;
         this.bufFac = bufFac;
         this.bufferSize = bufferSize;
         this.bufferSize2 = 2 * bufferSize;
         this.endNanos = endNanos;
-        this.unpackOnServer = unpackOnServer;
         this.state = State.EXPECT_HEADER_A;
         this.needMin = HEADER_A_LEN;
         this.limitBytes = limitBytes;
     }
 
-    public static Function<Flux<DataBuffer>, Publisher<EventBlobMapResult>> trans(String channelName, long endNanos, DataBufferFactory bufFac, int bufferSize, boolean unpackOnServer, long limitBytes) {
-        EventBlobToV1Map mapper = new EventBlobToV1Map(channelName, endNanos, bufFac, bufferSize, unpackOnServer, limitBytes);
+    public static Function<Flux<DataBuffer>, Publisher<MapJsonResult>> trans(String channelName, long endNanos, DataBufferFactory bufFac, int bufferSize, long limitBytes) {
+        EventBlobToJsonMap mapper = new EventBlobToJsonMap(channelName, endNanos, bufFac, bufferSize, limitBytes);
         return fl -> {
             return fl.map(mapper)
             .concatWith(Mono.defer(() -> Mono.just(mapper.lastResult())))
             .doOnNext(item -> {
                 if (item.term) {
-                    LOGGER.warn("EventBlobToV1Map reached TERM");
+                    LOGGER.warn("reached TERM");
                 }
             })
             .takeWhile(item -> !item.term)
-            .doOnDiscard(EventBlobMapResult.class, EventBlobMapResult::release)
+            .doOnDiscard(MapJsonResult.class, MapJsonResult::release)
             .doOnTerminate(mapper::release);
         };
     }
 
     @Override
-    public EventBlobMapResult apply(DataBuffer buf) {
-        LOGGER.trace("EventBlobToV1Map  apply  state: {}  buf: {}", state, buf);
+    public MapJsonResult apply(DataBuffer buf) {
+        LOGGER.trace("apply  state: {}  buf: {}", state, buf);
+        MapJsonResult res = new MapJsonResult();
         if (state == State.TERM) {
             //LOGGER.info("apply buffer despite TERM");
             DataBufferUtils.release(buf);
-            EventBlobMapResult res = new EventBlobMapResult();
             res.term = true;
             return res;
         }
-        cbuf = bufFac.allocateBuffer(bufferSize2);
         if (left != null) {
             if (needMin <= 0) {
                 throw new RuntimeException("logic");
@@ -151,7 +152,7 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
             }
             if (left.readableByteCount() >= needMin) {
                 LOGGER.debug("parse left  {}", state);
-                parse(left);
+                parse(res, left);
                 if (left.readableByteCount() != 0) {
                     throw new RuntimeException("logic");
                 }
@@ -162,7 +163,7 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
 
         while (state != State.TERM && buf.readableByteCount() > 0 && buf.readableByteCount() >= needMin) {
             LOGGER.debug("parse main  {}  {}", state, buf.readPosition());
-            parse(buf);
+            parse(res, buf);
         }
 
         if (state != State.TERM && buf.readableByteCount() > 0) {
@@ -178,15 +179,11 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
         else {
             DataBufferUtils.release(buf);
         }
-        DataBuffer rbuf = cbuf;
-        cbuf = null;
-        EventBlobMapResult res = new EventBlobMapResult();
-        res.buf = rbuf;
-        writtenBytes += res.buf.readableByteCount();
+        //LOGGER.error("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  {}", res.items.size());
         return res;
     }
 
-    void parse(DataBuffer buf) {
+    void parse(MapJsonResult res, DataBuffer buf) {
         LOGGER.debug("parse  state: {}  buf: {}", state, buf);
         if (buf == null) {
             throw new RuntimeException("logic");
@@ -204,7 +201,7 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
             parseHeaderD(buf);
         }
         else if (state == State.EXPECT_BLOBS) {
-            parseBlob(buf);
+            parseBlob(res, buf);
         }
         else if (state == State.EXPECT_SECOND_LENGTH) {
             parseSecondLength(buf);
@@ -300,16 +297,12 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
                 throw new RuntimeException("logic");
             }
             blobsCompression = 1;
-            if (unpackOnServer) {
-                blobUnpack = true;
-            }
             needMin += Byte.BYTES;
         }
         else {
             if (blobsCompression != -1 && blobsCompression != 0) {
                 throw new RuntimeException("logic");
             }
-            blobUnpack = false;
             blobsCompression = 0;
         }
         if ((dtypeBitmask & 0x4000) != 0) {
@@ -407,18 +400,6 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
             int n = bb.getInt();
             shapeLens[i] = n;
         }
-        cbuf = ensureWritable(cbuf, 256 + valueBytes);
-        if (blobUnpack) {
-
-            if (true) {
-                LOGGER.error("blobUnpack not supported currently");
-                throw new RuntimeException("todo");
-            }
-
-            if (kbuf == null) {
-                kbuf = bufFac.allocateBuffer(bufferSize2);
-            }
-        }
         state = State.EXPECT_BLOBS;
         needMin = 0;
         // ugly fixes for bug in writer
@@ -427,19 +408,10 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
         }
     }
 
-    int sizeOf(int type) {
-        if (type == 12) return 8;
-        if (type == 11) return 4;
-        if (type == 10) return 8;
-        if (type ==  9) return 8;
-        if (type ==  8) return 4;
-        if (type ==  7) return 4;
-        if (type ==  5) return 2;
-        if (type ==  4) return 2;
-        return 1;
-    }
-
     DataBuffer ensureWritable(DataBuffer buf, int n) {
+        if (buf == null) {
+            buf = bufFac.allocateBuffer(bufferSize2);
+        }
         int now = buf.writableByteCount();
         if (now >= n) {
             return buf;
@@ -451,131 +423,202 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
                 throw new RuntimeException("maximum buffer size exceeded");
             }
         }
-        buf.ensureCapacity(bufferSize2);
+        DataBuffer old = buf;
+        int rp0 = old.readPosition();
+        int wp0 = old.writePosition();
+        buf = bufFac.allocateBuffer(bufferSize2);
+        buf.write(old.slice(0, wp0));
+        buf.writePosition(wp0);
+        buf.readPosition(rp0);
         return buf;
     }
 
-    void parseBlob(DataBuffer buf) {
-        final int n = Math.min(buf.readableByteCount(), missingBytes);
-        // TODO do we enforce same compression for all blobs?
-        if (blobUnpack) {
-
-            if (true) {
-                LOGGER.error("blobUnpack not supported currently");
+    void writeEvent(MapJsonResult res) {
+        EventDataType edt = EventDataType.vals[blobsType];
+        if (blobsCompression == 0) {
+            //LOGGER.info("WRITE UNCOMPRESSED");
+            if (kbuf.readableByteCount() != edt.sizeOf()) {
+                throw new RuntimeException("error");
+            }
+            ByteBuffer src = kbuf.asByteBuffer(0, kbuf.writePosition());
+            if (blobsArray == 0) {
+                //LOGGER.info("WRITE SCALAR  len {}", kbuf.readableByteCount());
+                if (!headerOut) {
+                    writeHeader(res, channelName);
+                }
+                MapJsonEvent ev = new MapJsonEvent();
+                ev.ts = ts;
+                ev.pulse = pulse;
+                res.items.add(ev);
+                if (edt == UINT8) {
+                    ev.data = JsonNodeFactory.instance.numberNode(0xff & src.get());
+                }
+                else if (edt == UINT16) {
+                    ev.data = JsonNodeFactory.instance.numberNode(0xff & src.getShort());
+                }
+                else if (edt == UINT32) {
+                    ev.data = JsonNodeFactory.instance.numberNode(0xffL & src.getInt());
+                }
+                else if (edt == UINT64) {
+                    ev.data = JsonNodeFactory.instance.numberNode(src.getLong());
+                }
+                else if (edt == INT8) {
+                    ev.data = JsonNodeFactory.instance.numberNode(src.get());
+                }
+                else if (edt == INT16) {
+                    ev.data = JsonNodeFactory.instance.numberNode(src.getShort());
+                }
+                else if (edt == INT32) {
+                    ev.data = JsonNodeFactory.instance.numberNode(src.getInt());
+                }
+                else if (edt == INT64) {
+                    ev.data = JsonNodeFactory.instance.numberNode(src.getLong());
+                }
+                else if (edt == FLOAT32) {
+                    float v = src.getFloat();
+                    ev.data = JsonNodeFactory.instance.numberNode(v);
+                }
+                else if (edt == FLOAT64) {
+                    double v = src.getDouble();
+                    ev.data = JsonNodeFactory.instance.numberNode(v);
+                }
+                else {
+                    throw new RuntimeException("todo");
+                }
+            }
+            else {
+                LOGGER.error("++++++  TODO need test data  ++++++");
                 throw new RuntimeException("todo");
             }
-
-            kbuf = ensureWritable(kbuf, n);
-            kbuf.write(buf.slice(buf.readPosition(), n));
-            buf.readPosition(buf.readPosition() + n);
         }
-        else {
-            ensureWritable(cbuf, 21 + n);
-            if (!blobHeaderOut) {
+        else if (blobsCompression == 1) {
+            ByteBuffer src = kbuf.asByteBuffer(0, kbuf.writePosition());
+            int nbytes = (int) src.getLong();
+            if (nbytes > 1024 * 128) {
+                LOGGER.info("large compressed waveform  channel {}  pulse {}  nbytes {}", channelName, pulse, nbytes);
+                throw new RuntimeException("large waveform");
+            }
+            int tsize = edt.sizeOf();
+            int nf = nbytes / tsize;
+            ByteBuffer dst = ByteBuffer.allocate((20 * kbuf.readableByteCount() / 1024 + 1) * 1024);
+            BitShuffleLZ4JNIDecompressor decompressor = new BitShuffleLZ4JNIDecompressor();
+            int bs = src.getInt();
+            LOGGER.trace("pulse: {}  nf: {}  bs: {}  ty: {}  order: {}", pulse, nf, bs, blobsType, blobsByteOrder);
+            int a = decompressor.decompress(src, 12, dst, 0, nf, tsize, bs);
+            dst.limit(nbytes);
+            dst.position(0);
+            if (!headerOut) {
                 // ugly fixes for bug in writer
                 if (blobsArray == 1 && blobsShape != 1) {
-                    if (buf.readableByteCount() < 8) {
-                        throw new RuntimeException("logic");
-                    }
-                    ByteBuffer src = buf.asByteBuffer(buf.readPosition(), 8);
-                    int nf = (int) src.getLong();
-                    LOGGER.trace("current shape: {}  {}", shapeDims, shapeLens);
+                    //LOGGER.info("current shape: {}  {}", shapeDims, shapeLens);
                     shapeDims = 1;
-                    shapeLens[0] = nf / sizeOf(blobsType);
+                    shapeLens[0] = nf;
                 }
-                if (!headerOut) {
-                    writeHeader(cbuf, channelName);
-                    headerOut = true;
-                }
-                LOGGER.trace("write len1 {}  at {}", 17 + valueBytes, cbuf.writePosition());
-                ByteBuffer bbuf = cbuf.asByteBuffer(cbuf.writePosition(), 21);
-                cbuf.writePosition(cbuf.writePosition() + 21);
-                bbuf.putInt(17 + valueBytes);
-                bbuf.put((byte) 1);
-                bbuf.putLong(ts);
-                bbuf.putLong(pulse);
-                blobHeaderOut = true;
+                // TODO can I have a single call-site to writeHeader in this class?
+                writeHeader(res, channelName);
             }
-            cbuf.write(buf.slice(buf.readPosition(), n));
-            buf.readPosition(buf.readPosition() + n);
+            MapJsonEvent ev = new MapJsonEvent();
+            ev.ts = ts;
+            ev.pulse = pulse;
+            res.items.add(ev);
+            if (edt.isInt()) {
+                if (edt.isSignedInt()) {
+                    if (blobsArray == 1) {
+                        // TODO should the json value already be shaped? matter only for 1d, images are usually not fetched as json
+                        ArrayNode node = JsonNodeFactory.instance.arrayNode(nf);
+                        while (dst.remaining() > 0) {
+                            if (tsize == 1) {
+                                byte v = dst.get();
+                                node.add(v);
+                            }
+                            else if (tsize == 2) {
+                                short v = dst.getShort();
+                                node.add(v);
+                            }
+                            else if (tsize == 4) {
+                                int v = dst.getInt();
+                                node.add(v);
+                            }
+                            else if (tsize == 8) {
+                                long v = dst.getLong();
+                                node.add(v);
+                            }
+                            else {
+                                throw new RuntimeException("todo");
+                            }
+                        }
+                        ev.data = node;
+                    }
+                    else {
+                        LOGGER.error("blobsArray {}", blobsArray);
+                        throw new RuntimeException("todo");
+                    }
+                }
+                else if (edt.isUnsignedInt()) {
+                    if (blobsArray == 1) {
+                        // TODO should the json value already be shaped? matter only for 1d, images are usually not fetched as json
+                        ArrayNode node = new ArrayNode(JsonNodeFactory.instance);
+                        while (dst.remaining() > 0) {
+                            if (tsize == 1) {
+                                int v = 0xff & dst.get();
+                                node.add(v);
+                            }
+                            else if (tsize == 2) {
+                                int v = 0xff & dst.getShort();
+                                node.add(v);
+                            }
+                            else if (tsize == 4) {
+                                long v = 0xffL & dst.getInt();
+                                node.add(v);
+                            }
+                            else if (tsize == 8) {
+                                long v = dst.getLong();
+                                if (v < 0) {
+                                    throw new RuntimeException("Java has no unsigned 64 bit integer");
+                                }
+                                node.add(v);
+                            }
+                            else {
+                                throw new RuntimeException("todo");
+                            }
+                        }
+                        ev.data = node;
+                    }
+                    else {
+                        LOGGER.error("blobsArray {}", blobsArray);
+                        throw new RuntimeException("todo");
+                    }
+                }
+                else {
+                    throw new RuntimeException("todo");
+                }
+            }
+            else {
+                throw new RuntimeException("todo");
+            }
         }
+        else if (blobsCompression == 2) {
+            throw new RuntimeException("plain lz4 not handled yet");
+        }
+        else {
+            throw new RuntimeException("unknown compression");
+        }
+        kbuf.readPosition(0);
+        kbuf.writePosition(0);
+    }
+
+    void parseBlob(MapJsonResult res, DataBuffer buf) {
+        final int n = Math.min(buf.readableByteCount(), missingBytes);
+        // TODO do we enforce same compression for all blobs?
+        kbuf = ensureWritable(kbuf, n);
+        kbuf.write(buf.slice(buf.readPosition(), n));
+        buf.readPosition(buf.readPosition() + n);
         missingBytes -= n;
         if (missingBytes > 0) {
             needMin = 0;
         }
         else {
-            if (blobUnpack) {
-
-                if (true) {
-                    LOGGER.error("blobUnpack not supported currently");
-                    throw new RuntimeException("todo");
-                }
-
-                if (blobsCompression == 1) {
-                    if (false) {
-                        ByteBuffer src = kbuf.asByteBuffer(12, kbuf.writePosition());
-                        ByteBuffer dst = ByteBuffer.allocate(8 * 1024);
-                        LZ4Factory.safeInstance().safeDecompressor().decompress(src, dst);
-                    }
-                    ByteBuffer src = kbuf.asByteBuffer(0, kbuf.writePosition());
-                    ByteBuffer dst = ByteBuffer.allocate((20 * kbuf.readableByteCount() / 1024 + 1) * 1024);
-                    BitShuffleLZ4JNIDecompressor decompressor = new BitShuffleLZ4JNIDecompressor();
-                    // try it similar to the python implementation:
-                    int nf = (int) src.getLong();
-                    if (nf > 2 * 1024 * 1024) {
-                        LOGGER.info("large compressed waveform  channel: {}  pulse: {}  nf: {}", channelName, pulse, nf);
-                        throw new RuntimeException("large waveform");
-                    }
-                    int bs = src.getInt();
-                    LOGGER.trace("pulse: {}  n: {}  nf: {}  bs: {}  ty: {}  order: {}", pulse, n, nf, bs, blobsType, blobsByteOrder);
-                    int tsize = sizeOf(blobsType);
-                    int a = decompressor.decompress(src, 12, dst, 0, nf/tsize, tsize, bs);
-                    dst.limit(nf);
-                    if (false) {
-                        for (int i1 = 0; i1 < 8; i1 += 1) {
-                            System.err.println(String.format("i1: %3d  v: %10d", i1, dst.getInt()));
-                        }
-                    }
-                    dst.position(0);
-                    if (!headerOut) {
-                        // ugly fixes for bug in writer
-                        if (blobsArray == 1 && blobsShape != 1) {
-                            //LOGGER.info("current shape: {}  {}", shapeDims, shapeLens);
-                            shapeDims = 1;
-                            shapeLens[0] = nf/tsize;
-                        }
-                        writeHeader(cbuf, channelName);
-                        headerOut = true;
-                    }
-                    int m = nf;
-                    cbuf = ensureWritable(cbuf, m + 128);
-                    ByteBuffer bbuf = cbuf.asByteBuffer(cbuf.writePosition(), 21);
-                    cbuf.writePosition(cbuf.writePosition() + 21);
-                    bbuf.putInt(17 + m);
-                    bbuf.put((byte) 1);
-                    bbuf.putLong(ts);
-                    bbuf.putLong(pulse);
-                    cbuf.write(dst);
-                    bbuf = cbuf.asByteBuffer(cbuf.writePosition(), 4);
-                    cbuf.writePosition(cbuf.writePosition() + 4);
-                    bbuf.putInt(17 + m);
-                }
-                else if (blobsCompression == 2) {
-                    throw new RuntimeException("plain lz4 not handled yet");
-                }
-                else {
-                    throw new RuntimeException("unknown compression");
-                }
-                kbuf.readPosition(0);
-                kbuf.writePosition(0);
-            }
-            else {
-                LOGGER.trace("parseBlob  write len2 {}  at cbuf {}  ts {} {}", 17 + valueBytes, cbuf.writePosition(), ts / 1000000000, ts % 1000000000);
-                cbuf = ensureWritable(cbuf, 4);
-                ByteBuffer bbuf = cbuf.asByteBuffer(cbuf.writePosition(), 4);
-                cbuf.writePosition(cbuf.writePosition() + 4);
-                bbuf.putInt(17 + valueBytes);
-            }
+            writeEvent(res);
             state = State.EXPECT_SECOND_LENGTH;
             needMin = Integer.BYTES;
         }
@@ -587,24 +630,24 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
         ByteBuffer bb = buf.asByteBuffer(buf.readPosition(), needMin);
         buf.readPosition(buf.readPosition() + needMin);
         int len2 = bb.getInt();
+        // TODO attention debug code!
         if (len2 != -1 && len2 != 0 && len2 != blobLength) {
             LOGGER.error("event blob length mismatch  seenHeaderA {}  at {}  len2 {}  blobLength {}  pulse {}", seenHeaderA, buf.readPosition(), len2, blobLength, pulse);
+            int n1 = Math.max(0, pr - 16);
+            int n2 = Math.min(pw, pr + 16);
+            StringBuffer sbuf = new StringBuffer();
+            for (int i1 = n1; i1 < n2; i1 += 1) {
+                sbuf.append(String.format("%02x ", buf.getByte(i1)));
+            }
+            LOGGER.error("Context: {}", sbuf);
             throw new RuntimeException("unexpected 2nd length");
         }
         state = State.EXPECT_HEADER_A;
         needMin = HEADER_A_LEN;
-        if (limitBytes > 0 && writtenBytes >= limitBytes) {
-            LOGGER.warn("limit reached.  written {}  limit {}", writtenBytes, limitBytes);
-            state = State.TERM;
-        }
     }
 
     public void release() {
-        LOGGER.info("EventBlobToV1Map release  seenHeaderA {}  writtenBytes {}", seenHeaderA, writtenBytes);
-        if (cbuf != null) {
-            DataBufferUtils.release(cbuf);
-            cbuf = null;
-        }
+        LOGGER.info("release  seenHeaderA {}", seenHeaderA);
         if (left != null) {
             DataBufferUtils.release(left);
             left = null;
@@ -615,66 +658,30 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
         }
     }
 
-    public EventBlobMapResult lastResult() {
-        LOGGER.info("EventBlobToV1Map lastResult");
-        DataBuffer buf = bufFac.allocateBuffer(bufferSize2);
+    public MapJsonResult lastResult() {
+        LOGGER.info("lastResult");
+        // TODO can I ever have a last result?
+        // TODO is the default state a valid empty state?
+        MapJsonResult res = new MapJsonResult();
         if (!headerOut) {
-            writeHeader(buf, channelName);
+            writeHeader(res, channelName);
         }
-        EventBlobMapResult res = new EventBlobMapResult();
-        res.buf = buf;
         return res;
     }
 
-    void writeHeader(DataBuffer buf, String channelName) {
+    void writeHeader(MapJsonResult res, String channelName) {
+        MapJsonChannelStart mapev = new MapJsonChannelStart();
+        mapev.name = channelName;
+        res.items.add(mapev);
         BlobJsonHeader header = new BlobJsonHeader();
         header.name = channelName;
         if (blobsType != -1) {
-            header.type = DTypeBitmapUtils.Type.lookup((short) blobsType).toString().toLowerCase();
-            if (blobsCompression == 0 || blobUnpack) {
-                header.compression = "0";
-            }
-            else if (blobsCompression == 1) {
-                // bitshuffle lz4
-                header.compression = "1";
-            }
-            else if (blobsCompression == 2) {
-                // lz4
-                header.compression = "2";
-            }
-            else {
-                throw new RuntimeException("logic");
-            }
-            header.byteOrder = blobsByteOrder.toString();
-            header.array = blobsArray == 1;
-            if (shapeDims > 0) {
-                header.shape = new ArrayList<>();
-                for (int i = 0; i < shapeDims; i++) {
-                    header.shape.add(shapeLens[i]);
-                }
-            }
+            mapev.type = DTypeBitmapUtils.Type.lookup((short) blobsType).toString().toLowerCase();
+            mapev.byteOrder = blobsByteOrder.toString();
+            mapev.array = blobsArray == 1;
+            mapev.shape = Arrays.stream(shapeLens, 0, shapeDims).boxed().collect(Collectors.toList());
         }
-        String headerString;
-        try {
-            headerString = new ObjectMapper(new JsonFactory()).writeValueAsString(header);
-        }
-        catch (JsonProcessingException e) {
-            throw new RuntimeException("JsonProcessingException");
-        }
-        LOGGER.trace("headerString: {}", headerString);
-        ByteBuffer headerEncoded = StandardCharsets.UTF_8.encode(headerString);
-        int nh = headerEncoded.remaining();
-        int n = Integer.BYTES + Byte.BYTES + nh + Integer.BYTES;
-        ByteBuffer bb1 = buf.asByteBuffer(buf.writePosition(), n);
-        buf.writePosition(buf.writePosition() + n);
-        bb1.putInt(0);
-        bb1.put((byte)0);
-        bb1.put(headerEncoded);
-        if (bb1.position() != 5 + nh) {
-            throw new RuntimeException("logic");
-        }
-        bb1.putInt(0, 1 + nh);
-        bb1.putInt(1 + nh);
+        headerOut = true;
     }
 
 }

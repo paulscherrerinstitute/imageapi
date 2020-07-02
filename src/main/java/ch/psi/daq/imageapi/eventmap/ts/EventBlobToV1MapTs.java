@@ -1,6 +1,6 @@
 package ch.psi.daq.imageapi.eventmap.ts;
 
-import ch.psi.daq.imageapi.TrailingMapper;
+import ch.psi.daq.imageapi.PositionedDatafile;
 import ch.qos.logback.classic.Logger;
 import org.reactivestreams.Publisher;
 import org.slf4j.LoggerFactory;
@@ -11,9 +11,10 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.util.function.Function;
 
-public class EventBlobToV1MapTs implements TrailingMapper<Item> {
+public class EventBlobToV1MapTs implements Function<DataBuffer, Item> {
     static Logger LOGGER = (Logger) LoggerFactory.getLogger("EventBlobToV1MapTs");
     LoggerS LOGGER2;
     static final int HEADER_A_LEN = 2 * Integer.BYTES + 4 * Long.BYTES + 2 * Byte.BYTES;
@@ -94,6 +95,23 @@ public class EventBlobToV1MapTs implements TrailingMapper<Item> {
         mapper.contextId = contextId;
         return fl -> {
             return fl
+            .doOnDiscard(Object.class, obj -> {
+                if (obj == null) {
+                    LOGGER.error("null obj in ed1ee40c");
+                }
+                else if (obj instanceof DataBuffer) {
+                    LOGGER.info("Class in ed1ee40c {}", obj.getClass().getName());
+                    DataBufferUtils.release((DataBuffer) obj);
+                }
+                else if (obj instanceof PositionedDatafile) {
+                    LOGGER.info("Class in ed1ee40c {}", obj.getClass().getName());
+                    PositionedDatafile item = (PositionedDatafile) obj;
+                    item.release();
+                }
+                else {
+                    LOGGER.error("Class in ed1ee40c {}", obj.getClass().getName());
+                }
+            })
             .map(item -> {
                 try {
                     return mapper.apply(item);
@@ -104,6 +122,24 @@ public class EventBlobToV1MapTs implements TrailingMapper<Item> {
                 }
             })
             .concatWith(Mono.defer(() -> Mono.just(mapper.lastResult())))
+            .doOnDiscard(Object.class, obj -> {
+                if (obj == null) {
+                    LOGGER.error("null obj in cd8b9e02");
+                }
+                else if (obj instanceof Item) {
+                    LOGGER.info("Class in cd8b9e02 {}", obj.getClass().getName());
+                    Item item = (Item) obj;
+                    item.release();
+                }
+                else if (obj instanceof PositionedDatafile) {
+                    LOGGER.info("Class in cd8b9e02 {}", obj.getClass().getName());
+                    PositionedDatafile item = (PositionedDatafile) obj;
+                    item.release();
+                }
+                else {
+                    LOGGER.error("Class in cd8b9e02 {}", obj.getClass().getName());
+                }
+            })
             .doOnTerminate(mapper::release);
         };
     }
@@ -112,7 +148,6 @@ public class EventBlobToV1MapTs implements TrailingMapper<Item> {
     public Item apply(DataBuffer buf) {
         if (buf.readableByteCount() == 0) {
             LOGGER2.warn("empty byte buffer received");
-            //throw new RuntimeException("empty byte buffer received " + name);
         }
         LOGGER2.trace("apply  buf rp {}  buf wp {}  buf n {}", buf.readPosition(), buf.writePosition(), buf.readableByteCount());
         if (state == State.TERM) {
@@ -123,6 +158,7 @@ public class EventBlobToV1MapTs implements TrailingMapper<Item> {
                 LOGGER2.warn("apply buffer despite TERM  c: {}", termApplyCount);
             }
             termApplyCount += 1;
+            DataBufferUtils.release(buf);
             item = new Item();
             itemCount += 1;
             item.term = true;
@@ -392,14 +428,13 @@ public class EventBlobToV1MapTs implements TrailingMapper<Item> {
     }
 
     public void release() {
-        LOGGER2.debug("EventBlobToV1MapTs release");
+        LOGGER2.info("EventBlobToV1MapTs release");
         if (left != null) {
             DataBufferUtils.release(left);
             left = null;
         }
     }
 
-    @Override
     public Item lastResult() {
         DataBuffer buf = bufFac.allocateBuffer(bufferSize);
         item = apply(buf);

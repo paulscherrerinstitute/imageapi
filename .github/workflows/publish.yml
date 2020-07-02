@@ -1,8 +1,10 @@
 name: Build and Publish
 on:
   push:
+    # Disabled because it seems not reliable to fetch the jar from Github
+    # during Ansible deployment from the internal machine network.
     tags:
-      - publish
+      - DISABLEDpublish
 jobs:
   build:
     runs-on: ubuntu-latest

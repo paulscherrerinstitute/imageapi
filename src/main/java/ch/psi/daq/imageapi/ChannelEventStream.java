@@ -63,18 +63,15 @@ public class ChannelEventStream {
                 }
             })
             .filter(Optional::isPresent)
-            .flatMapSequential(Optional::get, 1, 1)
-            //.transform(pd -> DataBufferUtils.readByteChannel(() -> pd., toDataParams.bufFac, toDataParams.bufferSize))
-            .flatMapSequential(f -> {
+            .concatMap(Optional::get)
+            .concatMap(f -> {
                 LOGGER.info("read byte channel with buffersize {}  fileno {}", toDataParams.bufferSize, f.fileno);
                 return DataBufferUtils.readByteChannel(() -> f.channel, toDataParams.bufFac, toDataParams.bufferSize)
-                .doOnDiscard(DataBuffer.class, buf -> {
-                    LOGGER.trace("Release buffer");
-                    DataBufferUtils.release(buf);
+                .doOnDiscard(Object.class, buf -> {
+                    LOGGER.error("DISCARD 982u3roiajcsjfo");
                 })
                 .transform(transFac.makeTrans(toDataParams, f.fileno));
-            }, 1, 1)
-            ;
+            });
         })
         .collectList();
     }

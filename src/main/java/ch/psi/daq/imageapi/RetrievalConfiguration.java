@@ -8,6 +8,7 @@ import java.util.List;
 
 public class RetrievalConfiguration {
     public List<SplitNode> splitNodes;
+    public boolean mergeLocal;
 
     @Override
     public String toString() {

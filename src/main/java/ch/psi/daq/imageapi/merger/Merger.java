@@ -646,13 +646,12 @@ public class Merger implements Publisher<DataBuffer> {
             }
             else {
                 LOGGER.error("DATALOSS: {}", cbuf.readableByteCount());
-                DataBufferUtils.release(cbuf);
-                cbuf = null;
             }
         }
         else {
             LOGGER.info("finalComplete, no data to flush");
         }
+        release();
         scrd.onComplete();
         LOG2.warn("finalComplete RETURN");
     }
@@ -661,9 +660,14 @@ public class Merger implements Publisher<DataBuffer> {
         LOG2.error("selfError  writtenBytes {}", writtenBytes);
         dumpWrittenLog();
         for (MergerSubscriber scr : scrs) {
-            scr.sub.cancel();
+            scr.cancel();
         }
-        scrd.onError(e);
+        if (scrd != null) {
+            scrd.onError(e);
+        }
+        else {
+            LOGGER.error("can not signal error\n{}", e.toString());
+        }
         LOG2.error("selfError RETURN");
     }
 
