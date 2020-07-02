@@ -75,7 +75,7 @@ public class API_1_0_1 implements ApplicationListener<WebServerInitializedEvent>
     @PostMapping(path = "query", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
     public Mono<ResponseEntity<Flux<DataBuffer>>> query(ServerWebExchange exchange, @RequestBody Mono<Query> queryMono) {
         // So far just an alias
-        return queryLocal(exchange, queryMono);
+        return queryMerged(exchange, queryMono);
     }
 
     @PostMapping(path = "queryLocal", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
