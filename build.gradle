@@ -90,6 +90,7 @@ publishing {
         }
     }
     repositories {
+        /*
         maven {
             name "psi"
             url "https://artifacts.psi.ch/artifactory/libs-snapshots-local"
@@ -104,6 +105,15 @@ publishing {
             credentials {
                 username = "paulscherrerinstitute"
                 password = project.properties["ghtoken"] ?: "empty"
+            }
+        }
+        */
+        maven {
+            name = "GitHubPackages"
+            url = "https://maven.pkg.github.com/paulscherrerinstitute/imageapi"
+            credentials {
+                username = System.getenv("GITHUB_ACTOR")
+                password = System.getenv("GITHUB_TOKEN")
             }
         }
     }
