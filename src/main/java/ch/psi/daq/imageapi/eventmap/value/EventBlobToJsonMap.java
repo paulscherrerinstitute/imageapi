@@ -103,6 +103,20 @@ public class EventBlobToJsonMap implements Function<DataBuffer, MapJsonResult> {
         this.limitBytes = limitBytes;
     }
 
+    public static Flux<MapJsonResult> trans2(Flux<DataBuffer> fl, String channelName, long endNanos, DataBufferFactory bufFac, int bufferSize, long limitBytes) {
+        EventBlobToJsonMap mapper = new EventBlobToJsonMap(channelName, endNanos, bufFac, bufferSize, limitBytes);
+        return fl.map(mapper)
+        .concatWith(Mono.defer(() -> Mono.just(mapper.lastResult())))
+        .doOnNext(item -> {
+            if (item.term) {
+                LOGGER.warn("reached TERM");
+            }
+        })
+        .takeWhile(item -> !item.term)
+        .doOnDiscard(MapJsonResult.class, MapJsonResult::release)
+        .doOnTerminate(mapper::release);
+    }
+
     public static Function<Flux<DataBuffer>, Publisher<MapJsonResult>> trans(String channelName, long endNanos, DataBufferFactory bufFac, int bufferSize, long limitBytes) {
         EventBlobToJsonMap mapper = new EventBlobToJsonMap(channelName, endNanos, bufFac, bufferSize, limitBytes);
         return fl -> {

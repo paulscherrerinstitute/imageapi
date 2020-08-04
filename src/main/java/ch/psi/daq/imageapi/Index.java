@@ -4,7 +4,6 @@ import com.google.common.io.BaseEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -103,9 +102,13 @@ public class Index {
 
     static Mono<byte[]> openIndex(Path indexPath) {
         return Mono.fromCallable(() -> {
+            LOGGER.info("BEGIN openIndex {}", indexPath);
             long fileSize = Files.size(indexPath);
-            if (fileSize > 2 + 30 * 1024 * 1024) {
-                throw new RuntimeException(String.format("Index file is too large: %d", fileSize));
+            if (fileSize > 20 * 1024 * 1024) {
+                LOGGER.warn(String.format("Index file is large  size %d  path %s", fileSize, indexPath));
+            }
+            if (fileSize > 200 * 1024 * 1024) {
+                throw new RuntimeException(String.format("Index file is too large  size %d  this may indicate a problem with the channel data  path %s", fileSize, indexPath));
             }
             byte[] b1 = Files.readAllBytes(indexPath);
             int n = b1.length;
@@ -115,9 +118,10 @@ public class Index {
             if ((n-2) % N != 0) {
                 throw new RuntimeException(String.format("unexpected index file content  n: %d  %s", n, indexPath));
             }
-            return Arrays.copyOfRange(b1, 2, n);
-        })
-        .subscribeOn(Schedulers.parallel());
+            byte[] ret = Arrays.copyOfRange(b1, 2, n);
+            LOGGER.info("DONE  openIndex {}", indexPath);
+            return ret;
+        });
     }
 
     static long valueLongAt(byte[] a, int i) {

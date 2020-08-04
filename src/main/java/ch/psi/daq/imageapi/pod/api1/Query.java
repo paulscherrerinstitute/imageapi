@@ -16,4 +16,6 @@ public class Query {
     public int decompressOnServer;
     public long limitBytes;
 
+    public int errorAfterBytes;
+
 }

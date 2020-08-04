@@ -1,0 +1,31 @@
+<configuration>
+    <appender name="ROLLING" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>ret.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>ret-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <!-- max size per file, max days history,  -->
+            <maxFileSize>20MB</maxFileSize>
+            <maxHistory>20</maxHistory>
+            <totalSizeCap>300MB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <charset>UTF-8</charset>
+            <pattern>%d{yy-MM-dd HH:mm:ss.SSS, UTC} Z [%thread] %-5level %logger{35} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    <root level="INFO">
+        <appender-ref ref="ROLLING" />
+    </root>
+    <turboFilter class="ch.qos.logback.classic.turbo.MarkerFilter">
+        <Marker>MergerNesting</Marker>
+        <OnMatch>NEUTRAL</OnMatch>
+    </turboFilter>
+    <turboFilter class="ch.qos.logback.classic.turbo.MarkerFilter">
+        <Marker>MergerSubscriberTrack</Marker>
+        <OnMatch>NEUTRAL</OnMatch>
+    </turboFilter>
+    <turboFilter class="ch.qos.logback.classic.turbo.MarkerFilter">
+        <Marker>MergerSubscriptionTrack</Marker>
+        <OnMatch>NEUTRAL</OnMatch>
+    </turboFilter>
+</configuration>

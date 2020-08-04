@@ -2,6 +2,9 @@ package ch.psi.daq.imageapi.eventmap.ts;
 
 import ch.qos.logback.classic.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.buffer.*;
+
+import java.util.List;
 
 public class Item {
     static Logger LOGGER = (Logger) LoggerFactory.getLogger("MapTsItem");
@@ -11,9 +14,16 @@ public class Item {
     public int ix;
     public boolean isLast;
 
+    public static Item dummy(DataBufferFactory bufFac) {
+        Item ret = new Item();
+        ret.item1 = new ItemP();
+        ret.item1.buf = bufFac.wrap(new byte[] { (byte) 0x92 });
+        return ret;
+    }
+
     @Override
     public String toString() {
-        return String.format("TsItem { ix: %d  term: %s  isPlain %s  item1: %s, item2: %s }", ix, term, isPlainBuffer(), item1, item2);
+        return String.format("TsItem { %7s  ix: %d  term: %s  isPlain %s  item1: %s, item2: %s }", shortDesc(), ix, term, isPlainBuffer(), item1, item2);
     }
 
     public boolean isTerm() {
@@ -56,6 +66,22 @@ public class Item {
         return !term && item1 != null && item1.c == 0 && item1.p1 != item1.p2;
     }
 
+    public String shortDesc() {
+        if (isPlainBuffer()) {
+            return "PLAIN";
+        }
+        if (!hasMoreMarkers()) {
+            return "NOMORE";
+        }
+        if (item1.ty[ix] == 1) {
+            return "BEGIN";
+        }
+        if (item1.ty[ix] == 2) {
+            return "END";
+        }
+        return "UNKNOWN";
+    }
+
     public void adv() {
         if (isTerm()) {
             LOGGER.warn("adv called despite isTerm");
@@ -91,6 +117,43 @@ public class Item {
             item2.release();
             item2 = null;
         }
+    }
+
+    public long totalReadable() {
+        long n = 0;
+        if (item1 != null && item1.buf != null) {
+            n += item1.buf.readableByteCount();
+        }
+        if (item2 != null && item2.buf != null) {
+            n += item2.buf.readableByteCount();
+        }
+        return n;
+    }
+
+    public List<DataBuffer> takeBuffers() {
+        List<DataBuffer> ret;
+        if (item1 != null && item1.buf != null) {
+            if (item2 != null && item2.buf != null) {
+                ret = List.of(item1.buf, item2.buf);
+                item1.buf = null;
+                item2.buf = null;
+            }
+            else {
+                ret = List.of(item1.buf);
+                item1.buf = null;
+            }
+        }
+        else if (item2 != null && item2.buf != null) {
+            DataBufferUtils.release(item2.buf);
+            item2.buf = null;
+            LOGGER.error("logic");
+            throw new RuntimeException("logic");
+        }
+        else {
+            LOGGER.warn("Warning: empty item");
+            ret = List.of();
+        }
+        return ret;
     }
 
 }

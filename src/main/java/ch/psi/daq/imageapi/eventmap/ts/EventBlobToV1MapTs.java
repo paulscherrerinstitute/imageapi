@@ -2,7 +2,6 @@ package ch.psi.daq.imageapi.eventmap.ts;
 
 import ch.psi.daq.imageapi.PositionedDatafile;
 import ch.qos.logback.classic.Logger;
-import org.reactivestreams.Publisher;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
@@ -11,12 +10,10 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.nio.ByteBuffer;
-import java.nio.channels.SeekableByteChannel;
 import java.util.function.Function;
 
 public class EventBlobToV1MapTs implements Function<DataBuffer, Item> {
     static Logger LOGGER = (Logger) LoggerFactory.getLogger("EventBlobToV1MapTs");
-    LoggerS LOGGER2;
     static final int HEADER_A_LEN = 2 * Integer.BYTES + 4 * Long.BYTES + 2 * Byte.BYTES;
     DataBufferFactory bufFac;
     DataBuffer left;
@@ -37,39 +34,6 @@ public class EventBlobToV1MapTs implements Function<DataBuffer, Item> {
     String name;
     int termApplyCount;
     long itemCount;
-    int contextId;
-
-    static class LoggerS {
-        Logger logger;
-        public LoggerS(String name) {
-            logger = (Logger) LoggerFactory.getLogger("EventBlobToV1MapTs_"+name);
-            logger.setLevel(LOGGER.getEffectiveLevel());
-        }
-        public void trace(String fmt) {
-            logger.trace(fmt);
-        }
-        public void trace(String fmt, Object... args) {
-            logger.trace(fmt, args);
-        }
-        public void debug(String fmt) {
-            logger.debug(fmt);
-        }
-        public void debug(String fmt, Object... args) {
-            logger.debug(fmt, args);
-        }
-        public void info(String fmt) {
-            logger.info(fmt);
-        }
-        public void info(String fmt, Object... args) {
-            logger.info(fmt, args);
-        }
-        public void warn(String fmt, Object... args) {
-            logger.warn(fmt, args);
-        }
-        public void error(String fmt, Object... args) {
-            logger.error(fmt, args);
-        }
-    }
 
     enum State {
         EXPECT_HEADER_A,
@@ -78,9 +42,14 @@ public class EventBlobToV1MapTs implements Function<DataBuffer, Item> {
         TERM,
     }
 
+    public enum Mock {
+        NONE,
+        DUMMY_ITEM,
+        CHAIN_BUT_DUMMY,
+    }
+
     public EventBlobToV1MapTs(String name, long endNanos, DataBufferFactory bufferFactory, int bufferSize) {
         this.name = name;
-        this.LOGGER2 = new LoggerS(name);
         this.bufFac = bufferFactory;
         this.bufferSize = bufferSize;
         this.bufferSize2 = 2 * bufferSize;
@@ -90,72 +59,86 @@ public class EventBlobToV1MapTs implements Function<DataBuffer, Item> {
         this.needMin = HEADER_A_LEN;
     }
 
-    public static Function<Flux<DataBuffer>, Publisher<Item>> trans(String name, long endNanos, DataBufferFactory bufFac, int bufferSize, int contextId) {
-        EventBlobToV1MapTs mapper = new EventBlobToV1MapTs(name, endNanos, bufFac, bufferSize);
-        mapper.contextId = contextId;
-        return fl -> {
+    public static Flux<Item> trans2(Mock mock, Flux<DataBuffer> fl, String name, String channelName, long endNanos, DataBufferFactory bufFac, int bufferSize) {
+        if (mock == Mock.DUMMY_ITEM) {
             return fl
-            .doOnDiscard(Object.class, obj -> {
-                if (obj == null) {
-                    LOGGER.error("null obj in ed1ee40c");
-                }
-                else if (obj instanceof DataBuffer) {
-                    LOGGER.info("Class in ed1ee40c {}", obj.getClass().getName());
-                    DataBufferUtils.release((DataBuffer) obj);
-                }
-                else if (obj instanceof PositionedDatafile) {
-                    LOGGER.info("Class in ed1ee40c {}", obj.getClass().getName());
-                    PositionedDatafile item = (PositionedDatafile) obj;
-                    item.release();
-                }
-                else {
-                    LOGGER.error("Class in ed1ee40c {}", obj.getClass().getName());
-                }
-            })
-            .map(item -> {
+            .doOnNext(DataBufferUtils::release)
+            .map(buf -> Item.dummy(bufFac));
+        }
+
+        EventBlobToV1MapTs mapper;
+        mapper = new EventBlobToV1MapTs(name, endNanos, bufFac, bufferSize);
+        return fl
+        .doOnDiscard(Object.class, obj -> {
+            if (obj == null) {
+                LOGGER.error("null obj in ed1ee40c");
+            }
+            else if (obj instanceof DataBuffer) {
+                LOGGER.info("DataBuffer in ed1ee40c {}", obj.getClass().getName());
+                DataBufferUtils.release((DataBuffer) obj);
+            }
+            else if (obj instanceof PositionedDatafile) {
+                LOGGER.info("PositionedDatafile in ed1ee40c {}", obj.getClass().getName());
+                PositionedDatafile item = (PositionedDatafile) obj;
+                item.release();
+            }
+            else {
+                LOGGER.error("Class in ed1ee40c {}", obj.getClass().getName());
+            }
+        })
+        .map(buf -> {
+            if (mock == Mock.CHAIN_BUT_DUMMY) {
+                DataBufferUtils.release(buf);
+                return Item.dummy(bufFac);
+            }
+            else {
                 try {
-                    return mapper.apply(item);
+                    Item item = mapper.apply(buf);
+                    return item;
                 }
                 catch (Throwable e) {
-                    LOGGER.error("ERROR IN MAPPER {}", e.toString());
+                    LOGGER.error("Mapper failure {}", e.toString());
                     throw new RuntimeException(e);
                 }
-            })
-            .concatWith(Mono.defer(() -> Mono.just(mapper.lastResult())))
-            .doOnDiscard(Object.class, obj -> {
-                if (obj == null) {
-                    LOGGER.error("null obj in cd8b9e02");
-                }
-                else if (obj instanceof Item) {
-                    LOGGER.info("Class in cd8b9e02 {}", obj.getClass().getName());
-                    Item item = (Item) obj;
-                    item.release();
-                }
-                else if (obj instanceof PositionedDatafile) {
-                    LOGGER.info("Class in cd8b9e02 {}", obj.getClass().getName());
-                    PositionedDatafile item = (PositionedDatafile) obj;
-                    item.release();
+            }
+        })
+        .concatWith(Mono.defer(() -> {
+            try {
+                if (mock == Mock.CHAIN_BUT_DUMMY) {
+                    Item item = Item.dummy(bufFac);
+                    item.isLast = true;
+                    return Mono.just(item);
                 }
                 else {
-                    LOGGER.error("Class in cd8b9e02 {}", obj.getClass().getName());
+                    Item item = mapper.lastResult();
+                    if (item == null) {
+                        LOGGER.error("lastResult is null  name {}", name);
+                    }
+                    else {
+                    }
+                    return Mono.just(item);
                 }
-            })
-            .doOnTerminate(mapper::release);
-        };
+            }
+            catch (Throwable e) {
+                LOGGER.error("lastResult error  name {}  {}", name, e.toString());
+                throw new RuntimeException(e);
+            }
+        }))
+        .doOnTerminate(() -> mapper.release());
     }
 
     @Override
     public Item apply(DataBuffer buf) {
         if (buf.readableByteCount() == 0) {
-            LOGGER2.warn("empty byte buffer received");
+            LOGGER.debug("{}  empty byte buffer received", name);
         }
-        LOGGER2.trace("apply  buf rp {}  buf wp {}  buf n {}", buf.readPosition(), buf.writePosition(), buf.readableByteCount());
+        LOGGER.trace("{}  apply  buf rp {}  buf wp {}  buf n {}", name, buf.readPosition(), buf.writePosition(), buf.readableByteCount());
         if (state == State.TERM) {
             if (termApplyCount == 0) {
-                LOGGER2.trace("apply buffer despite TERM  c: {}", termApplyCount);
+                LOGGER.trace("{}  apply buffer despite TERM  c: {}", name, termApplyCount);
             }
             else {
-                LOGGER2.warn("apply buffer despite TERM  c: {}", termApplyCount);
+                LOGGER.warn("{}  apply buffer despite TERM  c: {}", name, termApplyCount);
             }
             termApplyCount += 1;
             DataBufferUtils.release(buf);
@@ -166,7 +149,7 @@ public class EventBlobToV1MapTs implements Function<DataBuffer, Item> {
         }
         else {
             Item ret = apply2(buf);
-            LOGGER2.trace("return Item  has item1 {}", ret.item1 != null);
+            LOGGER.trace("{}  return Item  has item1 {}", name, ret.item1 != null);
             return ret;
         }
     }
@@ -311,12 +294,12 @@ public class EventBlobToV1MapTs implements Function<DataBuffer, Item> {
         buf.readPosition(buf.readPosition() + needMin);
         int length = bb.getInt();
         if (length == 0) {
-            LOGGER2.warn("Stop because length == 0");
+            LOGGER.warn("{}  Stop because length == 0", name);
             state = State.TERM;
             return;
         }
         if (length < 40 || length > 60 * 1024 * 1024) {
-            LOGGER2.error(String.format("Stop because unexpected length: %d", length));
+            LOGGER.error("{}  Stop because unexpected  length {}", name, length);
             state = State.TERM;
             return;
         }
@@ -326,13 +309,13 @@ public class EventBlobToV1MapTs implements Function<DataBuffer, Item> {
         long iocTime = bb.getLong();
         byte status = bb.get();
         byte severity = bb.get();
-        LOGGER2.trace("seen  length  {}  timestamp {} {}  pulse {}", length, ts / 1000000000L, ts % 1000000000, pulse);
+        LOGGER.trace("{}  seen  length  {}  timestamp {} {}  pulse {}", name, length, ts / 1000000000L, ts % 1000000000, pulse);
         if (ts >= endNanos) {
             if (LOGGER.isTraceEnabled()) {
-                LOGGER2.warn("ts >= endNanos  {} {}  >=  {} {}   item {}", ts / 1000000000L, ts % 1000000000, endNanos / 1000000000L, endNanos % 1000000000, item);
+                LOGGER.warn("{}  ts >= endNanos  {} {}  >=  {} {}   item {}", name, ts / 1000000000L, ts % 1000000000, endNanos / 1000000000L, endNanos % 1000000000, item);
             }
             else {
-                LOGGER2.warn("ts >= endNanos  {} {}  >=  {} {}", ts / 1000000000L, ts % 1000000000, endNanos / 1000000000L, endNanos % 1000000000);
+                LOGGER.warn("{}  ts >= endNanos  {} {}  >=  {} {}", name, ts / 1000000000L, ts % 1000000000, endNanos / 1000000000L, endNanos % 1000000000);
             }
             state = State.TERM;
             buf.readPosition(bpos);
@@ -341,14 +324,14 @@ public class EventBlobToV1MapTs implements Function<DataBuffer, Item> {
         }
         int optionalFieldsLength = bb.getInt();
         if (optionalFieldsLength < -1 || optionalFieldsLength == 0) {
-            LOGGER2.error("unexpected value for optionalFieldsLength: {}", optionalFieldsLength);
+            LOGGER.error("{}  unexpected value for optionalFieldsLength: {}", name, optionalFieldsLength);
             throw new RuntimeException("unexpected optional fields");
         }
         if (optionalFieldsLength != -1) {
-            LOGGER2.warn("Found optional fields: {}", optionalFieldsLength);
+            LOGGER.warn("{}  Found optional fields: {}", name, optionalFieldsLength);
         }
         if (optionalFieldsLength > 2048) {
-            LOGGER2.error("unexpected optional fields: {}", optionalFieldsLength);
+            LOGGER.error("{}  unexpected optional fields: {}", name, optionalFieldsLength);
             throw new RuntimeException("unexpected optional fields");
         }
         headerLength = needMin;
@@ -386,13 +369,13 @@ public class EventBlobToV1MapTs implements Function<DataBuffer, Item> {
         buf.readPosition(buf.readPosition() + needMin);
         int len2 = bb.getInt();
         if (len2 == -1) {
-            LOGGER2.warn("2nd length -1 encountered, ignoring");
+            LOGGER.warn("{}  2nd length -1 encountered, ignoring", name);
         }
         else if (len2 == 0) {
-            LOGGER2.warn("2nd length 0 encountered, ignoring");
+            LOGGER.warn("{}  2nd length 0 encountered, ignoring", name);
         }
         else if (len2 != blobLength) {
-            LOGGER2.error("event blob length mismatch at {}   {} vs {}", buf.readPosition(), len2, blobLength);
+            LOGGER.error("{}  event blob length mismatch at {}   {} vs {}", name, buf.readPosition(), len2, blobLength);
             throw new RuntimeException("unexpected 2nd length");
         }
         reallocItem();
@@ -428,7 +411,7 @@ public class EventBlobToV1MapTs implements Function<DataBuffer, Item> {
     }
 
     public void release() {
-        LOGGER2.info("EventBlobToV1MapTs release");
+        LOGGER.debug("{}  EventBlobToV1MapTs release", name);
         if (left != null) {
             DataBufferUtils.release(left);
             left = null;
@@ -436,6 +419,7 @@ public class EventBlobToV1MapTs implements Function<DataBuffer, Item> {
     }
 
     public Item lastResult() {
+        LOGGER.debug("lastResult  name {}", name);
         DataBuffer buf = bufFac.allocateBuffer(bufferSize);
         item = apply(buf);
         item.isLast = true;

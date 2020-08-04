@@ -1,18 +1,20 @@
 package ch.psi.daq.imageapi.merger;
 
-import ch.psi.daq.imageapi.eventmap.ts.EventBlobToV1MapTs;
 import ch.psi.daq.imageapi.eventmap.ts.Item;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 import org.slf4j.LoggerFactory;
+import org.slf4j.Marker;
+import org.slf4j.MarkerFactory;
 
 import java.util.concurrent.atomic.AtomicLong;
 
 public class MergerSubscriber implements Subscriber<Item> {
     Logger LOGGER = (Logger) LoggerFactory.getLogger("MergerSubscriber");
     final Merger merger;
+    final String channelName;
     Subscription sub;
     Item item;
     int id;
@@ -22,6 +24,10 @@ public class MergerSubscriber implements Subscriber<Item> {
     boolean itemTerm;
     State state = State.Fresh;
     AtomicLong nreq = new AtomicLong();
+    AtomicLong nConstructed = new AtomicLong();
+    AtomicLong nSubscribed = new AtomicLong();
+    AtomicLong nReleased = new AtomicLong();
+    static Marker markerTrack = MarkerFactory.getMarker("MergerSubscriberTrack");
 
     public enum State {
         Fresh,
@@ -30,19 +36,22 @@ public class MergerSubscriber implements Subscriber<Item> {
         Released,
     }
 
-    MergerSubscriber(Merger merger, int id) {
+    MergerSubscriber(Merger merger, String channelName, int id) {
         Level level = LOGGER.getEffectiveLevel();
         LOGGER = (Logger) LoggerFactory.getLogger(String.format("MergerSubscriber_%02d", id));
         LOGGER.setLevel(level);
         this.merger = merger;
+        this.channelName = channelName;
         this.id = id;
         this.nreq.set(0);
+        nConstructed.getAndAdd(1);
     }
 
     @Override
     public void onSubscribe(Subscription sub) {
+        nSubscribed.getAndAdd(1);
         synchronized (merger) {
-            LOGGER.info("{}  onSubscribe", id);
+            LOGGER.debug("{}  onSubscribe  {}", id, channelName);
             if (sub == null) {
                 LOGGER.error(String.format("Publisher for id %d passed null Subscription", id));
                 merger.selfError(new RuntimeException(String.format("Publisher for id %d passed null Subscription", id)));
@@ -55,14 +64,13 @@ public class MergerSubscriber implements Subscriber<Item> {
             }
             this.sub = sub;
             state = State.Subscribed;
-            LOGGER.info("{}  onSubscribe RETURN", id);
         }
     }
 
     @Override
     public void onNext(Item it) {
         synchronized (merger) {
-            LOGGER.debug("{}  onNext  nreq {}  item {}", id, nreq, it);
+            LOGGER.trace(markerTrack, "{}  onNext  nreq {}  item {}", id, nreq, it);
             try {
                 if (state != State.Subscribed) {
                     LOGGER.warn(String.format("onNext  id %d  but not Subscribed, ignoring.", id));
@@ -103,7 +111,7 @@ public class MergerSubscriber implements Subscriber<Item> {
                     itemTerm = true;
                 }
                 else if (!it.isPlainBuffer() && !it.hasMoreMarkers()) {
-                    // nothing to do
+                    LOGGER.trace("NOT PLAIN AND NO MORE MARKERS");
                 }
                 else {
                     if (!it.verify()) {
@@ -115,12 +123,14 @@ public class MergerSubscriber implements Subscriber<Item> {
                 }
                 merger.next(id);
             }
+            catch (Throwable e) {
+                LOGGER.error("error in call to merger.next  id {}  {}", id, e.toString());
+            }
             finally {
                 if (it != null) {
                     it.release();
                 }
             }
-            LOGGER.debug("{}  onNext RETURN", id);
         }
     }
 
@@ -128,18 +138,20 @@ public class MergerSubscriber implements Subscriber<Item> {
     public void onError(Throwable e) {
         synchronized (merger) {
             if (state != State.Subscribed && state != State.Terminated) {
-                LOGGER.error("onError received in invalid state");
+                LOGGER.error("{}  onError received in invalid state  {}", id, channelName);
                 return;
             }
             if (state != State.Subscribed) {
+                LOGGER.error("{}  onError received while not subscribed  {}", id, channelName);
                 return;
             }
-            LOGGER.error("{}  onError: {}", id, e.toString());
+            StringBuilder sb = new StringBuilder();
+            merger.formatState(sb);
+            LOGGER.error("{}  onError in {}: {}\nmerger.formatState:\n{}", id, channelName, e.toString(), sb.toString());
             subError = true;
             state = State.Terminated;
             nreq.set(0);
             merger.selfError(e);
-            LOGGER.error("{}  onError RETURN", id);
         }
     }
 
@@ -147,18 +159,18 @@ public class MergerSubscriber implements Subscriber<Item> {
     public void onComplete() {
         synchronized (merger) {
             if (state != State.Subscribed && state != State.Terminated) {
-                LOGGER.error("onComplete received in invalid state");
+                LOGGER.error("onComplete received in invalid state  {}", channelName);
                 return;
             }
             if (state != State.Subscribed) {
+                LOGGER.error("onComplete received even though not subscribed  {}", channelName);
                 return;
             }
-            LOGGER.info("{}  onComplete  nreq {}  seenBytesFromUpstream {}  merger.totalSeenBytesFromUpstream {}", id, nreq, seenBytesFromUpstream, merger.totalSeenBytesFromUpstream);
+            LOGGER.debug("{}  onComplete  nreq {}  seenBytesFromUpstream {}  merger.totalSeenBytesFromUpstream {}", id, nreq, seenBytesFromUpstream, merger.totalSeenBytesFromUpstream);
             subComplete = true;
             state = State.Terminated;
             nreq.set(0);
             merger.signal(id);
-            LOGGER.info("{}  onComplete RETURN", id);
         }
     }
 
@@ -169,15 +181,17 @@ public class MergerSubscriber implements Subscriber<Item> {
     }
 
     public void request() {
+        LOGGER.trace(markerTrack, "request() {}  {}  BEFORE SYNC", id, channelName);
         synchronized (merger) {
+            LOGGER.trace(markerTrack, "request() {}  {}  INSIDE SYNC", id, channelName);
             if (state != State.Subscribed) {
                 LOGGER.info("request called without Subscribed");
                 return;
             }
-            LOGGER.debug("{}  request", id);
+            LOGGER.trace(markerTrack, "{}  request FORWARD", id);
             nreq.addAndGet(1);
             sub.request(1);
-            LOGGER.debug("{}  request RETURN", id);
+            LOGGER.trace(markerTrack, "{}  request END", id);
         }
     }
 
@@ -189,7 +203,7 @@ public class MergerSubscriber implements Subscriber<Item> {
 
     public void cancel() {
         synchronized (merger) {
-            LOGGER.info("cancel");
+            LOGGER.warn("cancel() {}  {}", id, channelName);
             state = State.Terminated;
             if (sub != null) {
                 sub.cancel();
@@ -198,24 +212,23 @@ public class MergerSubscriber implements Subscriber<Item> {
             else {
                 LOGGER.warn("cancel even though never active");
             }
-            LOGGER.info("cancel RETURN");
         }
     }
 
-    public String stateInfo() {
-        String desc = "";
+    public void formatState(StringBuilder sb) {
+        String s1 = "null";
         if (item != null) {
             if (item.isPlainBuffer()) {
-                desc = "isPlainBuffer";
+                s1 = "isPlainBuffer";
             }
             else if (item.hasMoreMarkers()) {
-                desc = "hasMoreMarkers";
+                s1 = "hasMoreMarkers";
             }
             else {
-                desc = "emptyNonNull";
+                s1 = "otherNonNull";
             }
         }
-        return String.format("state %s  has item %s  %s   %s", state, item != null, desc, item);
+        sb.append(String.format("MS %2d  state %s  has item %s  subComplete %s  subError %s   %s", id, state, s1, subComplete, subError, item));
     }
 
     public boolean hasItem() {
@@ -257,6 +270,7 @@ public class MergerSubscriber implements Subscriber<Item> {
     }
 
     public void release() {
+        nReleased.getAndAdd(1);
         if (state == State.Released) {
             LOGGER.warn("already Released");
         }

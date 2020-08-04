@@ -1,27 +1,26 @@
 package ch.psi.daq.imageapi;
 
 import ch.psi.daq.imageapi.finder.BaseDir;
-import ch.psi.daq.imageapi.finder.BaseDirFinderFormatV0;
 import ch.psi.daq.imageapi.finder.KeyspaceOrder2;
+import com.google.common.io.BaseEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.io.buffer.DataBufferUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 import reactor.util.function.Tuples;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
 import java.nio.channels.SeekableByteChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Duration;
 import java.time.Instant;
-import java.util.Comparator;
-import java.util.EnumSet;
 import java.util.List;
-import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 
 public class PositionedDatafile {
     static Logger LOGGER = LoggerFactory.getLogger(PositionedDatafile.class);
@@ -52,31 +51,36 @@ public class PositionedDatafile {
         return Index.openIndex(Path.of(path.toString() + "_Index"))
         .map(x -> Index.findGEByLong(beginNano, x))
         .flatMap(x -> {
-            if (!x.isSome()) {
-                return Mono.fromCallable(() -> {
-                    LOGGER.info("Seek  fileno {}  split {}   NONE FOUND SEEK TO END", fileno, split);
-                    SeekableByteChannel c = Files.newByteChannel(path, StandardOpenOption.READ);
-                    // TODO verify correct channel name here
-                    c.position(c.size());
-                    return PositionedDatafile.fromChannel(c, path, fileno);
-                });
-            }
             return Mono.fromCallable(() -> {
-                LOGGER.info("Seek  fileno {}  split {}  position {}", fileno, split, x.v);
                 SeekableByteChannel c = Files.newByteChannel(path, StandardOpenOption.READ);
-                // TODO verify correct channel name here
-                if (x.v >= c.size()) {
-                    throw new RuntimeException("Seek error");
+                long v;
+                long e = c.size();
+                if (x.isSome()) {
+                    v = x.v;
                 }
-                c.position(x.v);
+                else {
+                    v = e;
+                }
+                LOGGER.info("Seek  fileno {}  split {}  position {} / {}   path {}", fileno, split, v, e, path);
+                c.position(v);
                 return PositionedDatafile.fromChannel(c, path, fileno);
+            })
+            .timeout(Duration.ofMillis(4000))
+            .doOnError(TimeoutException.class, e -> {
+                LOGGER.error("Timout during file seek {}", path);
             });
-        })
-        .subscribeOn(Schedulers.parallel());
+        });
     }
 
-    public static Mono<PositionedDatafile> openAndPositionNoIndex(Path path, long beginNano) {
-        return openAndPositionNoIndex(path, beginNano, -1, 0xcafe);
+    static int readExact(SeekableByteChannel chn, ByteBuffer buf) throws IOException {
+        while (buf.remaining() > 0) {
+            int n1 = chn.read(buf);
+            if (n1 <= 0) {
+                throw new RuntimeException("can not read requested number of bytes");
+            }
+        }
+        buf.flip();
+        return 0;
     }
 
     public static Mono<PositionedDatafile> openAndPositionNoIndex(Path path, long beginNano, int fileno, int split) {
@@ -84,81 +88,137 @@ public class PositionedDatafile {
         return Mono.fromCallable(() -> {
             long fileSize = Files.size(path);
             SeekableByteChannel chn = Files.newByteChannel(path, StandardOpenOption.READ);
-            ByteBuffer buf = ByteBuffer.allocate(2048);
-            chn.read(buf);
-            buf.flip();
-            if (buf.remaining() < 6) {
-                throw new RuntimeException("bad datafile");
+            ByteBuffer buf = ByteBuffer.allocate(4096);
+            buf.clear();
+            buf.limit(6);
+            readExact(chn, buf);
+            if (buf.getShort() != 0) {
+                throw new RuntimeException(String.format("corrupt file  %s", path));
             }
-            buf.getShort();
             int j2 = buf.getInt();
             if (j2 < 1 || j2 > 256) {
                 throw new RuntimeException("bad channelname in datafile");
             }
-            long posBegin = 2 + j2;
-            buf.position((int)posBegin);
+            buf.clear();
+            buf.limit(j2 - 8);
+            readExact(chn, buf);
+            {
+                CharBuffer s1 = StandardCharsets.UTF_8.decode(buf);
+                //String s1 = BaseEncoding.base16().lowerCase().decode(buf.array(), buf.position(), buf.remaining());
+                LOGGER.warn("channel {}  path {}", s1, path);
+            }
+            buf.clear();
+            buf.limit(4);
+            readExact(chn, buf);
+            int j2b = buf.getInt();
+            if (j2b != j2) {
+                throw new RuntimeException(String.format("len mismatch  %d  vs  %d", j2b, j2));
+            }
+
+            int posBegin = 2 + j2;
+            buf.clear();
+            buf.limit(4);
+            readExact(chn, buf);
+            LOGGER.info("buffer  pos {}  lim {}  rem {}", buf.position(), buf.limit(), buf.remaining());
             int blobLen = buf.getInt();
-            if (blobLen < 0 || blobLen > 1024) {
-                throw new RuntimeException("bad blobLen");
+            LOGGER.info("blobLen {}", blobLen);
+            if (blobLen < 0 || blobLen > 2000) {
+                throw new RuntimeException(String.format("bad blobLen  %d", blobLen));
             }
             if (fileSize < posBegin + blobLen) {
                 throw new RuntimeException("not a single blob in file");
             }
+
+            buf.clear();
+            buf.limit(blobLen - 4);
+            readExact(chn, buf);
             buf.getLong();
             long tsMin = buf.getLong();
+            long pulse = buf.getLong();
+            buf.getLong();
+            buf.get();
+            buf.get();
+            LOGGER.info("1st event  ts {}  pulse {}", tsMin, pulse);
+            {
+                int opt = buf.getInt();
+                if (opt < -1 || opt > 1000) {
+                    LOGGER.error("optional field len: {}", opt);
+                    throw new RuntimeException(String.format("optional field len: %d", opt));
+                }
+                else if (opt > 0) {
+                    buf.position(buf.position() + opt);
+                }
+            }
+            {
+                int mask = buf.get();
+                if ((mask & 0x40) != 0) {
+                    String s1 = BaseEncoding.base16().lowerCase().encode(buf.array(), 0, blobLen);
+                    LOGGER.error("Data error in chunk\n{}", s1);
+                    throw new RuntimeException(String.format("Array data in file without index  mask %02x  path %s", mask, path));
+                }
+            }
             if (tsMin >= beginNano) {
+                LOGGER.info("-----------------   START FILE AT BEGIN  posBegin {}", posBegin);
                 chn.position(posBegin);
                 return PositionedDatafile.fromChannel(chn, path, fileno);
             }
-            long posEnd = ((fileSize - posBegin - 1) / blobLen) * blobLen + posBegin;
-            if (posEnd < posBegin) {
+            long posLast = (((fileSize - posBegin) / blobLen) - 1) * blobLen + posBegin;
+            if (posLast < posBegin) {
                 throw new RuntimeException("bad file structure");
             }
-            //throw new RuntimeException(String.format("blob length is: %d  tsMin: %d  posBegin: %d  posEnd: %d", blobLen, tsMin, posBegin, posEnd));
+            if (posLast == posBegin) {
+                chn.position(fileSize);
+                return PositionedDatafile.fromChannel(chn, path, fileno);
+            }
+            chn.position(posLast);
             buf.clear();
             buf.limit(blobLen);
-            chn.position(posEnd);
-            chn.read(buf);
-            buf.flip();
+            readExact(chn, buf);
             if (buf.remaining() != blobLen) {
-                throw new RuntimeException("can not read a full blob");
+                throw new RuntimeException(String.format("can not read a full blob  %d  vs  %d", buf.remaining(), blobLen));
             }
-            if (buf.getInt(0) != blobLen) {
-                throw new RuntimeException("invalid blob len encountered");
+            int blobLenB1 = buf.getInt(0);
+            if (blobLenB1 != blobLen) {
+                throw new RuntimeException(String.format("invalid blob len encountered  %d  vs  %d    posLast %d   path %s", blobLenB1, blobLen, posLast, path));
             }
             long tsMax = buf.getLong(12);
             if (tsMax < beginNano) {
-                chn.position(posEnd);
+                LOGGER.warn(String.format("tsMax < beginNano   %d   %d", tsMax, beginNano));
+                chn.position(fileSize);
                 return PositionedDatafile.fromChannel(chn, path, fileno);
             }
+            int btreads = 0;
             long j = posBegin;
-            long k = posEnd;
+            long k = posLast + blobLen;
+            long tsFound = -1;
+            long pulseFound = -1;
             while (k - j >= 2 * blobLen) {
                 long m = j + (k-j) / blobLen / 2 * blobLen;
                 chn.position(m);
                 buf.clear();
                 buf.limit(blobLen);
-                chn.read(buf);
-                buf.flip();
+                readExact(chn, buf);
+                btreads += 1;
                 if (buf.remaining() != blobLen) {
                     throw new RuntimeException("can not read a full blob");
                 }
                 long ts = buf.getLong(12);
                 if (ts >= beginNano) {
                     k = m;
+                    tsFound = ts;
+                    pulseFound = buf.getLong(20);
                 }
                 else {
                     j = m;
                 }
             }
+            LOGGER.info("positioned file after  btreads {}  tsFound {}  pulseFound {}  k {}", btreads, tsFound, pulseFound, k);
             chn.position(k);
             return PositionedDatafile.fromChannel(chn, path, fileno);
-            //throw new RuntimeException(String.format("blob length is: %d  tsMin: %d  tsMax: %d  posBegin: %d  posEnd: %d", blobLen, tsMin, tsMax, posBegin, posEnd));
-            //return PositionedDatafile.fromChannel(chn, path);
         });
     }
 
-    public static Mono<List<Flux<PositionedDatafile>>> positionedDatafilesFromKeyspace(KeyspaceOrder2 ksp, Instant begin, Instant end, int bufferSize, List<Integer> splits) {
+    public static Mono<List<Flux<PositionedDatafile>>> positionedDatafilesFromKeyspace(KeyspaceOrder2 ksp, Instant begin, Instant end, List<Integer> splits) {
         long beginNanos = begin.toEpochMilli() * 1000000L;
         long endNanos = end.toEpochMilli() * 1000000L;
         Mono<List<Flux<PositionedDatafile>>> ret = Flux.fromIterable(ksp.splits)
@@ -176,15 +236,15 @@ public class PositionedDatafile {
             .map(x -> Tuples.of(x.getT1(), Path.of(x.getT2())))
             .index()
             .concatMap(x -> {
-                long fileId = x.getT1();
+                int fileId = x.getT1().intValue();
                 Path path = x.getT2().getT2();
                 if (x.getT2().getT1().hasIndex) {
                     return PositionedDatafile.openAndPosition(path, beginNanos);
                 }
                 else {
-                    return PositionedDatafile.openAndPositionNoIndex(path, beginNanos);
+                    return PositionedDatafile.openAndPositionNoIndex(path, beginNanos, fileId, sp.split);
                 }
-            });
+            }, 1);
         })
         .collectList();
         return ret;

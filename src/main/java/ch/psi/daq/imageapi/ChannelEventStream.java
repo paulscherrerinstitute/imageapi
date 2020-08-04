@@ -62,16 +62,25 @@ public class ChannelEventStream {
                     return Optional.<Mono<PositionedDatafile>>empty();
                 }
             })
+            .doOnNext(x -> {
+                LOGGER.info("{}  dataFluxFromFiles  present {}  channel {}  split {}", toDataParams.req.getId(), x.isPresent(), ksp.channel.name, sp.split);
+            })
             .filter(Optional::isPresent)
-            .concatMap(Optional::get)
+            .concatMap(opt -> {
+                LOGGER.info("{}  dataFluxFromFiles prepare openAndPosition Mono before concatMap", toDataParams.req.getId());
+                if (opt == null) {
+                    throw new RuntimeException("null ptr");
+                }
+                return opt.get();
+            }, 1)
             .concatMap(f -> {
-                LOGGER.info("read byte channel with buffersize {}  fileno {}", toDataParams.bufferSize, f.fileno);
-                return DataBufferUtils.readByteChannel(() -> f.channel, toDataParams.bufFac, toDataParams.bufferSize)
-                .doOnDiscard(Object.class, buf -> {
+                LOGGER.info("{}  read byte channel with buffersize {}  fileno {}", toDataParams.req.getId(), toDataParams.bufferSize, f.fileno);
+                Flux<DataBuffer> fl = DataBufferUtils.readByteChannel(() -> f.takeChannel(), toDataParams.bufFac, toDataParams.bufferSize)
+                .doOnDiscard(Object.class, obj -> {
                     LOGGER.error("DISCARD 982u3roiajcsjfo");
-                })
-                .transform(transFac.makeTrans(toDataParams, f.fileno));
-            });
+                });
+                return transFac.makeTrans(fl, toDataParams, f.fileno);
+            }, 1);
         })
         .collectList();
     }

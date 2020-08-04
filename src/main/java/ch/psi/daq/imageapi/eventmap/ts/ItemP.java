@@ -17,14 +17,15 @@ public class ItemP {
     public int p2;
 
     String format(DataBuffer buf) {
-        byte[] a = new byte[Math.min(128, buf.writePosition())];
+        if (true) return "[.]";
+        byte[] a = new byte[Math.min(16, buf.writePosition())];
         buf.slice(0, buf.capacity()).read(a);
         return BaseEncoding.base16().lowerCase().encode(a);
     }
 
     @Override
     public String toString() {
-        return String.format("ItemP { p1: %5d  p2: %5d  c: %3d  ts: %s  ty: %s  pos: %s  buf: %s }", p1, p2, c,
+        return String.format("ItemP {\n  p1: %5d  p2: %5d  c: %3d\n  ts: %s\n  ty: %s  pos: %s\n  buf: %s\n}", p1, p2, c,
         ts == null ? null : Arrays.toString(Arrays.copyOf(ts, c)),
         ty == null ? null : Arrays.toString(Arrays.copyOf(ty, c)),
         pos == null ? null : Arrays.toString(Arrays.copyOf(pos, c)),
@@ -40,14 +41,6 @@ public class ItemP {
         Arrays.equals(ts, 0, c, x.ts, 0, x.c) &&
         Arrays.equals(pos, 0, c, x.pos, 0, x.c) &&
         Arrays.equals(ty, 0, c, x.ty, 0, x.c);
-    }
-
-    public boolean isA(int i) {
-        return i < c && ty[i] == 1;
-    }
-
-    public boolean isB(int i) {
-        return i < c && ty[i] == 2;
     }
 
     public void release() {

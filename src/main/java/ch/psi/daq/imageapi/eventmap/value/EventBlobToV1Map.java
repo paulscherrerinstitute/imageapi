@@ -101,20 +101,18 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
         this.limitBytes = limitBytes;
     }
 
-    public static Function<Flux<DataBuffer>, Publisher<EventBlobMapResult>> trans(String channelName, long endNanos, DataBufferFactory bufFac, int bufferSize, boolean unpackOnServer, long limitBytes) {
-        EventBlobToV1Map mapper = new EventBlobToV1Map(channelName, endNanos, bufFac, bufferSize, unpackOnServer, limitBytes);
-        return fl -> {
-            return fl.map(mapper)
-            .concatWith(Mono.defer(() -> Mono.just(mapper.lastResult())))
-            .doOnNext(item -> {
-                if (item.term) {
-                    LOGGER.warn("EventBlobToV1Map reached TERM");
-                }
-            })
-            .takeWhile(item -> !item.term)
-            .doOnDiscard(EventBlobMapResult.class, EventBlobMapResult::release)
-            .doOnTerminate(mapper::release);
-        };
+    public static Flux<EventBlobMapResult> trans2(Flux<DataBuffer> fl, String channelName, long endNanos, DataBufferFactory bufFac, int bufferSize, boolean unpackOnServer, long limitBytes) {
+        final EventBlobToV1Map mapper = new EventBlobToV1Map(channelName, endNanos, bufFac, bufferSize, unpackOnServer, limitBytes);
+        return fl.map(mapper)
+        .concatWith(Mono.defer(() -> Mono.just(mapper.lastResult())))
+        .doOnNext(item -> {
+            if (item.term) {
+                LOGGER.warn("EventBlobToV1Map reached TERM");
+            }
+        })
+        .takeWhile(item -> !item.term)
+        .doOnDiscard(EventBlobMapResult.class, EventBlobMapResult::release)
+        .doOnTerminate(mapper::release);
     }
 
     @Override
@@ -242,11 +240,11 @@ public class EventBlobToV1Map implements Function<DataBuffer, EventBlobMapResult
         byte severity = bb.get();
         seenHeaderA += 1;
         LOGGER.trace("seen  length {}  timestamp {}  pulse {}  seenHeaderA {}", length, ts, pulse, seenHeaderA);
-        if (ts < 1200100100100100100L || ts > 1700100100100100100L) {
+        if (ts < 100100100100100100L || ts > 1800100100100100100L) {
             LOGGER.error("unexpected ts {}", ts);
             throw new RuntimeException("error");
         }
-        if (pulse < 0 || pulse > 20100100100L) {
+        if (pulse < -1 || pulse > 40100100100L) {
             LOGGER.debug("unexpected pulse {}", pulse);
             //throw new RuntimeException("error");
         }

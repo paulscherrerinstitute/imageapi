@@ -1,6 +1,5 @@
 package ch.psi.daq.imageapi.merger;
 
-import ch.psi.daq.imageapi.eventmap.ts.EventBlobToV1MapTs;
 import ch.psi.daq.imageapi.eventmap.ts.Item;
 import ch.psi.daq.imageapi.eventmap.ts.ItemP;
 import ch.qos.logback.classic.Level;
@@ -9,6 +8,8 @@ import io.netty.buffer.ByteBuf;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.slf4j.LoggerFactory;
+import org.slf4j.Marker;
+import org.slf4j.MarkerFactory;
 import org.springframework.core.io.buffer.*;
 import reactor.core.publisher.Flux;
 
@@ -18,10 +19,8 @@ import java.util.List;
 
 public class Merger implements Publisher<DataBuffer> {
     static Logger LOGGER = (Logger) LoggerFactory.getLogger("Merger");
-    static Logger LOG2 = LOGGER;
-    static {
-        LOGGER.setLevel(Level.INFO);
-    }
+    static Marker markerNesting = MarkerFactory.getMarker("MergerNesting");
+    String channelName;
     boolean doTrace = LOGGER.isTraceEnabled();
     List<Flux<Item>> inp;
     int nsubscribed;
@@ -45,6 +44,8 @@ public class Merger implements Publisher<DataBuffer> {
     boolean requireBufferType = false;
     int chunkEmit = Integer.MIN_VALUE;
     int chunkExpect = Integer.MIN_VALUE;
+    int assembleInnerReturn = -1;
+    int assembleInnerBreakReason = -1;
 
     enum WriteType {
         FULL,
@@ -67,13 +68,14 @@ public class Merger implements Publisher<DataBuffer> {
             this.wty = wty;
         }
         public String toString() {
-            return String.format("Written { uix %2d  pos %10d  end %10d  ts %16d  wty %5s}", uix, pos, end, ts, wty);
+            return String.format("Written { uix %2d  pos %10d  end %10d  ts %16d  wty %5s }", uix, pos, end, ts, wty);
         }
     }
 
     List<Written> writtenLog = new ArrayList<>();
 
-    public Merger(List<Flux<Item>> inp, DataBufferFactory bufFac, int bufferSize) {
+    public Merger(String channelName, List<Flux<Item>> inp, DataBufferFactory bufFac, int bufferSize) {
+        this.channelName = channelName;
         this.inp = inp;
         this.bufFac2 = bufFac;
         this.bufFac = new DefaultDataBufferFactory();
@@ -83,7 +85,7 @@ public class Merger implements Publisher<DataBuffer> {
             throw new RuntimeException("checkBuf");
         }
         for (int i3 = 0; i3 < inp.size(); i3 += 1) {
-            MergerSubscriber scr = new MergerSubscriber(this, i3);
+            MergerSubscriber scr = new MergerSubscriber(this, channelName, i3);
             scrs.add(scr);
         }
         for (int i3 = 0; i3 < inp.size(); i3 += 1) {
@@ -142,6 +144,7 @@ public class Merger implements Publisher<DataBuffer> {
     }
 
     public synchronized void request(long n, int inReq) {
+        LOGGER.trace(markerNesting, "Merger::request  BEGIN  n {}  inReq {}  nreqd {}", n, inReq, nreqd);
         if (n == Long.MAX_VALUE) {
             if (nreqd != 0) {
                 LOGGER.warn("Request unbounded even though previous request!  nreqd: {}", nreqd);
@@ -149,6 +152,7 @@ public class Merger implements Publisher<DataBuffer> {
             nreqd = Long.MAX_VALUE;
         }
         else if (n < 1) {
+            LOGGER.error("logic");
             selfError(new RuntimeException("logic"));
         }
         else if (n > Long.MAX_VALUE / 3 && nreqd > Long.MAX_VALUE / 3) {
@@ -158,10 +162,19 @@ public class Merger implements Publisher<DataBuffer> {
         else {
             nreqd += n;
         }
-        LOGGER.trace("request  n: {}  total: {}  inReq: {}", n, nreqd, inReq);
-        if (inReq == 1) {
-            assemble();
+        LOGGER.trace(markerNesting, "Merger::request  DO     n {}  inReq {}  nreqd {}", n, inReq, nreqd);
+        if (inReq < 0) {
+            LOGGER.error("logic");
+            selfError(new RuntimeException("logic"));
         }
+        else if (inReq == 0) {
+            assemble(-1);
+        }
+        else if (inAssemble <= 0) {
+            LOGGER.error("logic");
+            selfError(new RuntimeException("logic"));
+        }
+        LOGGER.trace(markerNesting, "Merger::request  END    n {}  inReq {}  nreqd {}", n, inReq, nreqd);
     }
 
     public synchronized void cancel() {
@@ -176,6 +189,7 @@ public class Merger implements Publisher<DataBuffer> {
     }
 
     synchronized void release() {
+        LOGGER.debug("release BEGIN");
         for (MergerSubscriber scr : scrs) {
             scr.release();
         }
@@ -184,9 +198,12 @@ public class Merger implements Publisher<DataBuffer> {
             cbuf = null;
         }
         released = true;
+        LOGGER.debug("release END");
     }
 
     public synchronized void next(int id) {
+        long nrequ = nrequ();
+        LOGGER.trace(markerNesting, "Merger::next  BEGIN  id {}  nrequ {}", id, nrequ);
         if (cancelled) {
             LOGGER.warn("next called even though cancelled  id: {}", id);
             return;
@@ -196,9 +213,9 @@ public class Merger implements Publisher<DataBuffer> {
             return;
         }
         try {
-            LOGGER.trace("{}  next  nrequ: {}", id, nrequ());
-            if (nrequ() == 0) {
-                assemble();
+            LOGGER.trace("{}  next  nrequ: {}", id, nrequ);
+            if (nrequ == 0) {
+                assemble(id);
             }
             else {
                 LOGGER.trace("{}  request waiting for outstanding upstream", id);
@@ -208,9 +225,12 @@ public class Merger implements Publisher<DataBuffer> {
             LOGGER.error("{}  err in next: {}", id, e.toString());
             selfError(e);
         }
+        LOGGER.trace(markerNesting, "Merger::next  END    id {}  nrequ {}", id, nrequ);
     }
 
     public synchronized void signal(int id) {
+        long nrequ = nrequ();
+        LOGGER.trace(markerNesting, "Merger::signal  BEGIN  id {}  nrequ {}", id, nrequ);
         if (cancelled) {
             LOGGER.warn("signal called even though cancelled  id: {}", id);
             return;
@@ -220,22 +240,24 @@ public class Merger implements Publisher<DataBuffer> {
             return;
         }
         try {
-            if (nrequ() == 0) {
-                assemble();
+            if (nrequ == 0) {
+                assemble(id);
             }
             else {
-                LOG2.warn("{}  signal waiting for outstanding upstream", id);
+                LOGGER.warn("{}  signal waiting for outstanding upstream", id);
             }
         }
         catch (Throwable e) {
             LOGGER.error("{}  err in signal: {}", e.toString(), id);
             selfError(e);
         }
+        LOGGER.trace(markerNesting, "Merger::signal  END    id {}  nrequ {}", id, nrequ);
     }
 
-    synchronized void assemble() {
+    synchronized void assemble(int id) {
+        LOGGER.trace(markerNesting, "Merger::assemble  BEGIN  id {}  redoAssemble {}", id, redoAssemble);
         if (cancelled) {
-            LOG2.info("assemble  already cancelled, no need for assemble");
+            LOGGER.warn("in assemble():  already cancelled, no need to assemble");
             return;
         }
         if (cbuf == null) {
@@ -249,25 +271,35 @@ public class Merger implements Publisher<DataBuffer> {
             }
         }
         if (inAssemble > 0) {
-            LOG2.debug("assemble  SKIP");
-            redoAssemble = 1;
-            return;
+            LOGGER.trace(markerNesting, "Merger::assemble  SKIP   id {}  redoAssemble {}", id, redoAssemble);
+            redoAssemble += 1;
         }
-        try {
-            inAssemble += 1;
-            assembleInner();
-            while (redoAssemble == 1) {
-                //LOG2.warn("assemble  REDO");
-                redoAssemble = 0;
-                assembleInner();
+        else {
+            try {
+                inAssemble += 1;
+                assembleInner(id);
+                while (redoAssemble != 0) {
+                    if (redoAssemble < 0) {
+                        LOGGER.error("redoAssemble < 0");
+                        selfError(new RuntimeException("redoAssemble < 0"));
+                        return;
+                    }
+                    LOGGER.trace(markerNesting, "Merger::assemble  REDO   id {}  redoAssemble {}", id, redoAssemble);
+                    redoAssemble -= 1;
+                    assembleInner(id);
+                }
             }
-        }
-        finally {
-            inAssemble -= 1;
+            finally {
+                inAssemble -= 1;
+            }
+            LOGGER.trace(markerNesting, "Merger::assemble  END    id {}  redoAssemble {}", id, redoAssemble);
         }
     }
 
-    void assembleInner() {
+    void assembleInner(int id) {
+        LOGGER.trace(markerNesting, "Merger::assembleInner  BEGIN  id {}  nreqd {}", id, nreqd);
+        assembleInnerReturn = -1;
+        assembleInnerBreakReason = -1;
         if (nrequ() != 0) {
             LOGGER.debug("assembleInner request waiting for outstanding upstream");
             return;
@@ -377,7 +409,8 @@ public class Merger implements Publisher<DataBuffer> {
                     i2 = -1;
                 }
                 if (i2 < 0) {
-                    if (doTrace) LOGGER.trace("-------   choice not possible   ----------");
+                    LOGGER.trace(markerNesting, "-------   choice not possible   ----------");
+                    assembleInnerBreakReason = 1;
                     break;
                 }
                 inpix = i2;
@@ -411,18 +444,19 @@ public class Merger implements Publisher<DataBuffer> {
                     int len2 = bb.getInt(pos + len1 - 4);
                     if (len1 != len2) {
                         LOGGER.error("len mismatch  {} vs {}", len1, len2);
-                        dumpWrittenLog();
+                        dumpState();
                         selfError(new RuntimeException("bad"));
                         return;
                     }
                     chunkExpect = len1;
                     if (chunkExpect != n) {
                         LOGGER.error("full chunk in same buffer copy  six {}  pos {}  n {}  chunkExpect {}", six, pos, n, chunkExpect);
-                        dumpWrittenLog();
+                        dumpState();
                         selfError(new RuntimeException("bad"));
                         return;
                     }
                     if (!writeOutput(buf, pos, n)) {
+                        assembleInnerReturn = 1;
                         return;
                     }
                     writtenLog.add(new Written(inpix, pos, pos + n, tsm, WriteType.FULL));
@@ -446,6 +480,7 @@ public class Merger implements Publisher<DataBuffer> {
                     }
                     chunkEmit = n;
                     if (!writeOutput(buf, pos, n)) {
+                        assembleInnerReturn = 2;
                         return;
                     }
                     writtenLog.add(new Written(inpix, pos, pos + n, tsm, WriteType.BEGIN));
@@ -464,7 +499,8 @@ public class Merger implements Publisher<DataBuffer> {
                     return;
                 }
                 if (!fscr.hasItem()) {
-                    LOG2.trace("state {}  inpix {}  no item", state, inpix);
+                    LOGGER.trace(markerNesting, "state {}  inpix {}  NO ITEM  breaking", state, inpix);
+                    assembleInnerBreakReason = 2;
                     break;
                 }
                 Item item = fscr.getItem();
@@ -480,6 +516,7 @@ public class Merger implements Publisher<DataBuffer> {
                     }
                     chunkEmit += n;
                     if (!writeOutput(buf, pos, n)) {
+                        assembleInnerReturn = 3;
                         return;
                     }
                     writtenLog.add(new Written(inpix, pos, pos + n, lastTs, WriteType.BLOB));
@@ -499,17 +536,13 @@ public class Merger implements Publisher<DataBuffer> {
                     int pos = fscr.item.item1.p1;
                     int n = fscr.item.item1.pos[six] - pos;
                     long ts = fscr.item.item1.ts[six];
-
-                    //LOGGER.trace("terminated buffer  inpix {}  pos {}  n {}  ts {}  buf {}", inpix, pos, n, ts, buf);
-
                     int len2 = buf.asByteBuffer(0, buf.capacity()).getInt(pos + n - 4);
                     if (len2 != chunkExpect) {
                         LOGGER.error("terminal len mismatch  chunkExpect {}  len2 {}", chunkExpect, len2);
-                        dumpWrittenLog();
+                        dumpState();
                         selfError(new RuntimeException("bad"));
                         return;
                     }
-
                     if (nreqd <= 0) {
                         selfError(new RuntimeException(String.format("about to call writeOutput with nreqd: %d", nreqd)));
                         return;
@@ -517,14 +550,17 @@ public class Merger implements Publisher<DataBuffer> {
                     chunkEmit += n;
                     if (chunkEmit != chunkExpect) {
                         LOGGER.error("chunkExpect != chunkEmit  chunkExpect {}  chunkEmit {}", chunkExpect, chunkEmit);
-                        dumpWrittenLog();
+                        dumpState();
                         selfError(new RuntimeException("bad"));
+                        assembleInnerReturn = 13;
                         return;
                     }
                     if (!writeOutput(buf, pos, n)) {
+                        assembleInnerReturn = 4;
                         return;
                     }
                     writtenLog.add(new Written(inpix, pos, pos + n, ts, WriteType.END));
+                    LOGGER.trace(markerNesting, "terminated buffer  inpix {}  pos {}  n {}  ts {}  buf {}", inpix, pos, n, ts, buf);
                     fscr.itemAdvOrRemove();
                     chunkExpect = Integer.MIN_VALUE;
                     chunkEmit = Integer.MIN_VALUE;
@@ -533,17 +569,21 @@ public class Merger implements Publisher<DataBuffer> {
                     lastTs = -1;
                 }
                 else {
-                    LOG2.error("state {}  no plain, no has more", state);
+                    LOGGER.error("state {}  no plain, no has more", state);
                     selfError(new RuntimeException(String.format("state %d  no plain, no has more", state)));
                     return;
                 }
             }
             else {
+                LOGGER.error("logic");
                 scrd.onError(new RuntimeException("logic"));
+                assembleInnerReturn = 13;
                 return;
             }
         }
         if (cancelled) {
+            LOGGER.debug("assembleInner  do not check for refill because cancelled");
+            assembleInnerReturn = 2;
             return;
         }
         if (nreqd > 0) {
@@ -551,33 +591,40 @@ public class Merger implements Publisher<DataBuffer> {
             for (int i1 = 0; i1 < scrs.size(); i1 += 1) {
                 MergerSubscriber scr = scrs.get(i1);
                 if (!scr.hasItem() && scr.maybeMoreItems()) {
-                    LOG2.debug("Request next item for {}  item null: {}  isPlainBuffer: {}  isTerm: {}",
+                    LOGGER.debug("Request next item for {}  item null: {}  isPlainBuffer: {}  isTerm: {}",
                     i1, scr.item == null, scr.item != null && scr.item.isPlainBuffer(), scr.item != null && scr.item.isTerm());
                     scr.request();
                     nReqUp += 1;
                 }
             }
             if (nReqUp == 0) {
+                LOGGER.trace(markerNesting, "Merger  refill  nReqUp == 0");
                 boolean allCompleteAndEmpty = scrs.stream().allMatch(scr -> !scr.hasItem() && !scr.maybeMoreItems());
                 if (allCompleteAndEmpty) {
+                    LOGGER.trace(markerNesting, "Merger  refill  nReqUp == 0 && allCompleteAndEmpty");
                     finalComplete();
                     if (redoAssemble != 0) {
+                        LOGGER.trace(markerNesting, "Merger  refill  nReqUp == 0 && allCompleteAndEmpty  RESET REDO COUNT");
                         redoAssemble = 0;
                     }
                 }
                 else {
-                    int i1 = 0;
-                    for (MergerSubscriber scr : scrs) {
-                        LOGGER.warn("illegal scr {} info {}", i1, scr.stateInfo());
-                        i1 += 1;
-                    }
+                    LOGGER.trace(markerNesting, "Merger  refill  nReqUp == 0 && !allCompleteAndEmpty");
+                    dumpState();
                 }
             }
         }
+        assembleInnerReturn = 0;
+        LOGGER.trace(markerNesting, "Merger::assembleInner  END    id {}  nreqd {}", id, nreqd);
     }
 
+    long writeOutputN = 0;
+
     synchronized boolean writeOutput(DataBuffer src, int pos, int n) {
+        writeOutputN += 1;
         if (!checkBuf(cbuf)) {
+            LOGGER.error("checkBuf error");
+            selfError(new RuntimeException("checkBuf error"));
             return false;
         }
         if (cancelled) {
@@ -598,8 +645,10 @@ public class Merger implements Publisher<DataBuffer> {
             LOGGER.trace("writeOutput  not enough space  {}  {}", n, cbuf.writableByteCount());
             DataBuffer xbuf = cbuf;
             cbuf = bufFac.allocateBuffer(bufferSize);
+            LOGGER.trace(markerNesting, "Merger  onNext  item to downstream  BEGIN  writeOutputN {}", writeOutputN);
             nreqd -= 1;
             scrd.onNext(xbuf);
+            LOGGER.trace(markerNesting, "Merger  onNext  item to downstream  END    writeOutputN {}", writeOutputN);
             if (!isWritableBuffer(cbuf)) {
                 LOGGER.error("buffer not writable");
                 selfError(new RuntimeException("buffer not writable"));
@@ -607,11 +656,13 @@ public class Merger implements Publisher<DataBuffer> {
             }
         }
         if (cancelled) {
-            LOGGER.info("writeOutput  downstream has cancelled, return early");
+            LOGGER.warn("writeOutput  downstream has cancelled, return early");
             return false;
         }
-        if (cbuf.writableByteCount() < n) {
+        if (n > cbuf.writableByteCount()) {
             if (cbuf.capacity() > 50 * 1024 * 1024) {
+                LOGGER.error("cbuf still too small");
+                selfError(new RuntimeException("cbuf still too small"));
                 return false;
             }
             else {
@@ -620,14 +671,13 @@ public class Merger implements Publisher<DataBuffer> {
                     bufferSize *= 2;
                 }
                 cbuf.ensureCapacity(bufferSize);
-                if (cbuf.writableByteCount() < n) {
+                if (n > cbuf.writableByteCount()) {
                     LOGGER.error("can not allocate enough space to write  n: {}", n);
                     selfError(new RuntimeException("can not allocate space to write"));
                     return false;
                 }
             }
         }
-
         DataBuffer sl = src.slice(pos, n);
         cbuf.write(sl);
         writtenBytes += sl.readableByteCount();
@@ -635,7 +685,7 @@ public class Merger implements Publisher<DataBuffer> {
     }
 
     synchronized void finalComplete() {
-        LOG2.warn("finalComplete  writtenBytes {}", writtenBytes);
+        LOGGER.warn("finalComplete  writtenBytes {}", writtenBytes);
         finalCompleteDone = true;
         if (cbuf != null) {
             if (nreqd > 0) {
@@ -653,12 +703,13 @@ public class Merger implements Publisher<DataBuffer> {
         }
         release();
         scrd.onComplete();
-        LOG2.warn("finalComplete RETURN");
+        LOGGER.warn("finalComplete RETURN");
     }
 
     synchronized void selfError(Throwable e) {
-        LOG2.error("selfError  writtenBytes {}", writtenBytes);
-        dumpWrittenLog();
+        StringBuilder sb = new StringBuilder();
+        formatState(sb);
+        LOGGER.error("selfError  {}", sb.toString());
         for (MergerSubscriber scr : scrs) {
             scr.cancel();
         }
@@ -668,20 +719,36 @@ public class Merger implements Publisher<DataBuffer> {
         else {
             LOGGER.error("can not signal error\n{}", e.toString());
         }
-        LOG2.error("selfError RETURN");
+        LOGGER.error("selfError RETURN");
     }
 
     long nrequ() {
         return scrs.stream().map(MergerSubscriber::nreq).reduce(0L, Long::sum);
     }
 
-    void dumpWrittenLog() {
-        StringBuffer sb = new StringBuffer();
-        for (Written w : writtenLog) {
-            sb.append(w.toString());
-            sb.append("\n");
+    public synchronized void formatSubscribers(StringBuilder sb) {
+        for (MergerSubscriber sub : scrs) {
+            sub.formatState(sb);
+            sb.append("\n\n");
         }
-        LOGGER.info("Written:\n{}", sb);
+    }
+
+    void formatWrittenLog(StringBuilder sb) {
+        for (Written w : writtenLog) {
+            sb.append(w.toString()).append("\n");
+        }
+    }
+
+    public synchronized void formatState(StringBuilder sb) {
+        sb.append(String.format("writtenBytes %d  nreqd %d  nrequ %d  assembleInnerReturn %d  assembleInnerBreakReason %d  redoAssemble %d  cancelled %s", writtenBytes, nreqd, nrequ(), assembleInnerReturn, assembleInnerBreakReason, redoAssemble, cancelled)).append("\n");
+        formatSubscribers(sb);
+        formatWrittenLog(sb);
+    }
+
+    void dumpState() {
+        StringBuilder sb = new StringBuilder();
+        formatState(sb);
+        LOGGER.error("MERGER STATE\n{}", sb.toString());
     }
 
 }

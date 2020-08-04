@@ -6,9 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.List;
 
-public class RetrievalConfiguration {
+public class ConfigurationRetrieval {
     public List<SplitNode> splitNodes;
     public boolean mergeLocal;
+    public ConfigurationDatabase database;
 
     @Override
     public String toString() {

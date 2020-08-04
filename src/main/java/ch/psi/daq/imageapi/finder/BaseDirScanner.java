@@ -25,10 +25,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class BaseDirScanner {
-    static final Logger LOGGER = (Logger) LoggerFactory.getLogger(BaseDirScanner.class);
-    {
-        LOGGER.setLevel(Level.INFO);
-    }
+    static final Logger LOGGER = (Logger) LoggerFactory.getLogger("BaseDirScanner");
     final CacheLRU<String, ScanDataFilesResult> cacheForChannel = new CacheLRU<>(1<<15);
     final Thread tix;
     final Map<Channel, CompletableFuture<ScanDataFilesResult>> inProgress = new TreeMap<>();
@@ -67,15 +64,21 @@ public class BaseDirScanner {
                     LOGGER.warn("conf has no entries");
                 }
                 else {
+                    // Find the first config entry before or at beginMs
+                    // Use that keyspace from there...
                     for (int i1 = 0; i1 < conf.entries.size(); i1 += 1) {
                         ChannelConfigEntry e1 = conf.entries.get(i1);
-                        LOGGER.debug("entry1 {}  ts: {}  bs: {}  bin: {}", i1, e1.ts / 1000000, e1.bs, e1.ts / 1000000 / e1.bs);
+                        LOGGER.info("ChannelConfigEntry e1  ix {}  ts {}  bs {}  bin {}", i1, e1.ts / 1000000, e1.bs, e1.ts / 1000000 / e1.bs);
                         ChannelConfigEntry e2 = null;
                         long toMs = endMs;
                         if (i1 < conf.entries.size() - 1) {
                             e2 = conf.entries.get(i1 + 1);
                             toMs = Math.min(toMs, e2.ts / 1000000);
-                            LOGGER.debug("entry2 {}  ts: {}  bs: {}  bin: {}", i1 + 1, e2.ts / 1000000, e2.bs, e2.ts / 1000000 / e2.bs);
+                            LOGGER.info("ChannelConfigEntry e2  ix {}  ts {}  bs {}  bin {}", i1 + 1, e2.ts / 1000000, e2.bs, e2.ts / 1000000 / e2.bs);
+                            if (e2.ts / 1000000 <= beginMs) {
+                                LOGGER.info("DISREGARD AND CONTINUE");
+                                continue;
+                            }
                         }
                         LOGGER.debug("toMs: {}", toMs);
                         if (res.keyspaces.size() == 0) {
@@ -100,7 +103,7 @@ public class BaseDirScanner {
                         }
                         else {
                             if (!res.keyspaces.get(0).ksp.equals(String.format("%d", e1.ks))) {
-                                LOGGER.warn("!res.keyspaces.get(0).ksp.equals  i1: {}  {}  vs  {}", i1, res.keyspaces.get(0).ksp, e1.ks);
+                                //LOGGER.warn("!res.keyspaces.get(0).ksp.equals  i1: {}  {}  vs  {}", i1, res.keyspaces.get(0).ksp, e1.ks);
                                 //throw new RuntimeException("logic");
                             }
                         }
@@ -109,24 +112,23 @@ public class BaseDirScanner {
                         for (; tsMs < toMs; tsMs += e1.bs) {
                             long bin = tsMs / e1.bs;
                             LOGGER.debug("add file  tsMs: {}  bin: {}  next tsMs: {}", tsMs, bin, tsMs + e1.bs);
-                            for (Split split : res.keyspaces.get(0).splits) {
-                                int dummy = 0;
-                                String fn = String.format("config i1: %d  %s/%s_%d/byTime/%s/%019d/%010d/%019d_%05d_Data", i1, channel.base.baseDir, channel.base.baseKeyspaceName, e1.ks, channel.name, bin, split.split, e1.bs, dummy);
-                                LOGGER.debug("fn: {}", fn);
-                                boolean hasIndex = false;
-                                if (e1.ks == 3 || e1.ks == 4) {
-                                    hasIndex = true;
-                                }
-                                TimeBin2 tb = new TimeBin2(bin, e1.bs, hasIndex);
-                                boolean alreadyThere = false;
-                                for (TimeBin2 tb2 : split.timeBins) {
-                                    if (tb2.timeBin == tb.timeBin && tb2.binSize == tb.binSize) {
-                                        alreadyThere = true;
-                                        break;
+                            for (KeyspaceOrder2 ksp2 : res.keyspaces) {
+                                LOGGER.info("Look at ksp2  ks {}  splits {}", ksp2.ksp, ksp2.splits);
+                                for (Split split : ksp2.splits) {
+                                    int dummy = 0;
+                                    String fn = String.format("%s/%s_%s/byTime/%s/%019d/%010d/%019d_%05d_Data_Index", channel.base.baseDir, channel.base.baseKeyspaceName, ksp2.ksp, channel.name, bin, split.split, e1.bs, dummy);
+                                    boolean hasIndex = Files.isReadable(Path.of(fn));
+                                    TimeBin2 tb = new TimeBin2(bin, e1.bs, hasIndex);
+                                    boolean alreadyThere = false;
+                                    for (TimeBin2 tb2 : split.timeBins) {
+                                        if (tb2.timeBin == tb.timeBin && tb2.binSize == tb.binSize) {
+                                            alreadyThere = true;
+                                            break;
+                                        }
                                     }
-                                }
-                                if (!alreadyThere) {
-                                    split.timeBins.add(tb);
+                                    if (!alreadyThere) {
+                                        split.timeBins.add(tb);
+                                    }
                                 }
                             }
                         }
