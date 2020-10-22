@@ -1,23 +1,19 @@
 package ch.psi.daq.imageapi.controller;
 
 import ch.psi.daq.imageapi.*;
-import ch.psi.daq.imageapi.eventmap.value.OutputBuffer;
 import ch.psi.daq.imageapi.finder.BaseDirFinderFormatV0;
+import ch.psi.daq.imageapi.pod.api1.ChannelConfigSearchQuery;
 import ch.psi.daq.imageapi.pod.api1.ChannelSearchQuery;
 import ch.psi.daq.imageapi.pod.api1.Order;
 import ch.psi.daq.imageapi.pod.api1.Query;
 import ch.qos.logback.classic.Logger;
 import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.ser.std.StdArraySerializers;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.context.WebServerInitializedEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.core.io.buffer.*;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.ResourceUtils;
@@ -26,7 +22,6 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Hooks;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.SynchronousSink;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
@@ -34,9 +29,6 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.sql.*;
 import java.util.*;
 import java.util.function.Function;
 
@@ -54,7 +46,7 @@ public class API_1_0_1 implements ApplicationListener<WebServerInitializedEvent>
     String localAddressString;
     String localHostname;
     String canonicalHostname;
-    static Scheduler dbsched = Schedulers.newParallel("db", 64);
+    static Scheduler dbsched = Schedulers.newParallel("db", 32);
     {
         try {
             localAddress = InetAddress.getLocalHost();
@@ -144,132 +136,8 @@ public class API_1_0_1 implements ApplicationListener<WebServerInitializedEvent>
         return queryData.queryMergedJson(exchange, queryMono);
     }
 
-    static class ChannelLister {
-        ConfigurationRetrieval conf;
-        DataBufferFactory bufFac;
-        ResultSet res;
-        OutputBuffer outbuf;
-        JsonFactory jfac;
-        JsonGenerator jgen;
-        //JsonNodeFactory jnf = JsonNodeFactory.instance;
-        boolean hasError;
-        Order order;
-        String searchRegexp;
-        static ChannelLister create(ConfigurationRetrieval conf, DataBufferFactory bufFac, Order order) {
-            return create(conf, bufFac, order, null);
-        }
-        static ChannelLister create(ConfigurationRetrieval conf, DataBufferFactory bufFac, Order order, String searchRegexp) {
-            LOGGER.info("ChannelLister create");
-            if (searchRegexp != null) {
-                if (!searchRegexp.endsWith("$")) {
-                    searchRegexp = searchRegexp + ".*";
-                }
-                if (!searchRegexp.startsWith("^")) {
-                    searchRegexp = ".*" + searchRegexp;
-                }
-            }
-            ChannelLister ret = new ChannelLister();
-            ret.conf = conf;
-            ret.order = order;
-            ret.searchRegexp = searchRegexp;
-            ret.bufFac = bufFac;
-            ret.outbuf = new OutputBuffer(bufFac, 8 * 1024);
-            ret.jfac = new JsonFactory();
-            try {
-                ret.startJson();
-            }
-            catch (IOException e) {
-                LOGGER.error("{}", e.toString());
-                ret.hasError = true;
-            }
-            try {
-                ret.startQuery();
-            }
-            catch (SQLException e) {
-                LOGGER.error("{}", e.toString());
-                ret.hasError = true;
-            }
-            return ret;
-        }
-        void startJson() throws IOException {
-            jgen = jfac.createGenerator(outbuf);
-            jgen.writeStartArray();
-            jgen.writeStartObject();
-            jgen.writeStringField("backend", "");
-            jgen.writeFieldName("channels");
-            jgen.writeStartArray();
-        }
-        void startQuery() throws SQLException {
-            ConfigurationDatabase c = conf.database;
-            String dbUrl = String.format("jdbc:postgresql://%s:%d/%s", c.host, c.port, c.database);
-            Connection conn = DriverManager.getConnection(dbUrl, c.username, c.password);
-            PreparedStatement st;
-            String ord = "asc";
-            if (order == Order.DESC) {
-                ord = "desc";
-            }
-            String selectColumns = "name, facility";
-            if (searchRegexp == null) {
-                String sql = "select "+selectColumns+" from channels order by facility, name "+ord;
-                LOGGER.info("query start sql {}", sql);
-                st = conn.prepareStatement(sql);
-            }
-            else {
-                String sql = "select "+selectColumns+" from channels where name ~* ? order by facility, name "+ord;
-                LOGGER.info("query start sql {}  [{}]", sql, searchRegexp);
-                st = conn.prepareStatement(sql);
-                st.setString(1, searchRegexp);
-            }
-            res = st.executeQuery();
-        }
-        static ChannelLister generate(ChannelLister self, SynchronousSink<List<DataBuffer>> sink) {
-            if (self.hasError) {
-                sink.error(new RuntimeException("error already during create"));
-            }
-            else {
-                try {
-                    self.gen(sink);
-                }
-                catch (IOException | SQLException e) {
-                    sink.error(e);
-                }
-            }
-            return self;
-        }
-        void gen(SynchronousSink<List<DataBuffer>> sink) throws IOException, SQLException {
-            int i1 = 0;
-            while (res.next() && outbuf.totalPending() < 32 * 1024) {
-                String name = res.getString(1);
-                String facility = res.getString(2);
-                jgen.writeString(name);
-                i1 += 1;
-            }
-            LOGGER.info("gen out {}", i1);
-            if (i1 == 0) {
-                jgen.writeEndArray();
-                jgen.writeEndObject();
-                jgen.writeEndArray();
-                jgen.close();
-                sink.next(outbuf.getPending());
-                sink.complete();
-            }
-            else {
-                sink.next(outbuf.getPending());
-            }
-        }
-        static void release(ChannelLister self) {
-            LOGGER.info("ChannelLister release");
-        }
-    }
-
-    Flux<DataBuffer> channelsJson(DataBufferFactory bufFac, Order order) {
-        return Flux.generate(() -> ChannelLister.create(conf, bufFac, order), ChannelLister::generate, ChannelLister::release)
-        .subscribeOn(dbsched)
-        .flatMapIterable(Function.identity());
-    }
-
-    Flux<DataBuffer> channelsJson(DataBufferFactory bufFac, Order order, String regexp) {
-        return Flux.generate(() -> ChannelLister.create(conf, bufFac, order, regexp), ChannelLister::generate, ChannelLister::release)
+    Flux<DataBuffer> channelsJson(DataBufferFactory bufFac, ChannelConfigSearchQuery q, boolean configOut) {
+        return Flux.generate(() -> ChannelLister.create(conf, bufFac, q.order(), q.regex, q.sourceRegex, q.descriptionRegex, configOut), ChannelLister::generate, ChannelLister::release)
         .subscribeOn(dbsched)
         .flatMapIterable(Function.identity());
     }
@@ -277,7 +145,9 @@ public class API_1_0_1 implements ApplicationListener<WebServerInitializedEvent>
     @GetMapping(path = "channels", produces = MediaType.APPLICATION_JSON_VALUE)
     public Mono<ResponseEntity<Flux<DataBuffer>>> channelsGet(ServerWebExchange exchange) {
         LOGGER.info("Request for channelsGet");
-        return Mono.just(channelsJson(exchange.getResponse().bufferFactory(), Order.ASC))
+        ChannelConfigSearchQuery q = new ChannelConfigSearchQuery();
+        q.ordering = "asc";
+        return Mono.just(channelsJson(exchange.getResponse().bufferFactory(), q, false))
         .map(fl -> {
             LOGGER.info("Building response entity");
             return ResponseEntity.ok()
@@ -287,10 +157,12 @@ public class API_1_0_1 implements ApplicationListener<WebServerInitializedEvent>
         });
     }
 
-    @GetMapping(path = "channelsRegexp/{regexp}", produces = MediaType.APPLICATION_JSON_VALUE)
+    @GetMapping(path = "channels/search/regexp/{regexp}", produces = MediaType.APPLICATION_JSON_VALUE)
     public Mono<ResponseEntity<Flux<DataBuffer>>> channelsGet(ServerWebExchange exchange, @PathVariable String regexp) {
         LOGGER.info("Request for channelsRegexp  [{}]", regexp);
-        return Mono.just(channelsJson(exchange.getResponse().bufferFactory(), Order.ASC, regexp))
+        ChannelConfigSearchQuery q = new ChannelConfigSearchQuery();
+        q.ordering = "asc";
+        return Mono.just(channelsJson(exchange.getResponse().bufferFactory(), q, false))
         .map(fl -> {
             return ResponseEntity.ok()
             .header("X-CanonicalHostname", canonicalHostname)
@@ -300,14 +172,32 @@ public class API_1_0_1 implements ApplicationListener<WebServerInitializedEvent>
     }
 
     @PostMapping(path = "channels", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public Mono<ResponseEntity<Flux<DataBuffer>>> channelsPost(ServerWebExchange exchange, @RequestBody Mono<ChannelSearchQuery> queryMono) {
+    public Mono<ResponseEntity<Flux<DataBuffer>>> channelsPost(ServerWebExchange exchange, @RequestBody Mono<ChannelConfigSearchQuery> queryMono) {
         LOGGER.info("Request for channelsPost");
         return queryMono.map(query -> {
             if (!query.valid()) {
                 throw new RuntimeException("invalid query");
             }
             LOGGER.info("regex: {}", query.regex);
-            return channelsJson(exchange.getResponse().bufferFactory(), query.order(), query.regex);
+            return channelsJson(exchange.getResponse().bufferFactory(), query, false);
+        })
+        .map(fl -> {
+            return ResponseEntity.ok()
+            .header("X-CanonicalHostname", canonicalHostname)
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(fl);
+        });
+    }
+
+    @PostMapping(path = "channels/config", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public Mono<ResponseEntity<Flux<DataBuffer>>> channelsConfigPost(ServerWebExchange exchange, @RequestBody Mono<ChannelConfigSearchQuery> queryMono) {
+        LOGGER.info("Request for channelsPost");
+        return queryMono.map(query -> {
+            if (!query.valid()) {
+                throw new RuntimeException("invalid query");
+            }
+            LOGGER.info("regex: {}", query.regex);
+            return channelsJson(exchange.getResponse().bufferFactory(), query, true);
         })
         .map(fl -> {
             return ResponseEntity.ok()
@@ -381,11 +271,15 @@ public class API_1_0_1 implements ApplicationListener<WebServerInitializedEvent>
         localPort = ev.getWebServer().getPort();
         try {
             ConfigurationRetrieval conf = loadConfiguration(ev);
+            conf.validate();
             LOGGER.info("loaded: {}", conf);
             if (conf != null) {
                 this.conf = conf;
                 splitNodes = conf.splitNodes;
             }
+        }
+        catch (ConfigurationRetrieval.InvalidException e) {
+            LOGGER.error("Invalid configuration: {}", e.toString());
         }
         catch (IOException e) {
             throw new RuntimeException(e);

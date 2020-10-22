@@ -6,16 +6,13 @@ import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Query {
-
     public List<String> channels;
     public Range range;
-
+    public Aggregation aggregation;
     // The following are for testing usage only:
     public List<Integer> splits;
     public int bufferSize;
     public int decompressOnServer;
     public long limitBytes;
-
     public int errorAfterBytes;
-
 }

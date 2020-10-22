@@ -1,14 +1,8 @@
 package ch.psi.daq.imageapi.controller;
 
-import ch.qos.logback.classic.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.ResourceLoader;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.lang.management.*;
@@ -16,31 +10,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 @RestController
-public class Welcome {
-    static Logger LOGGER = (Logger) LoggerFactory.getLogger("Welcome");
-    @Autowired
-    ResourceLoader loader;
-    @Value("${imageapi.staticFilesLocal:false}")
-    boolean staticFilesLocal;
+public class JavaInfo {
     @Autowired
     API_1_0_1 api101;
 
-    @GetMapping(path = "/s/{fname}")
-    public Resource staticFile(@PathVariable String fname) {
-        if (staticFilesLocal) {
-            return loader.getResource("file:src/main/resources/html/" + fname);
-        }
-        else {
-            return loader.getResource("classpath:html/" + fname);
-        }
-    }
-
-    @GetMapping(path = "/")
-    public Resource index() {
-        return staticFile("index.html");
-    }
-
-    public class MemStdUsage {
+    public static class MemStdUsage {
         public long init;
         public long committed;
         public long used;
@@ -61,7 +35,7 @@ public class Welcome {
         }
     }
 
-    public class MemStd {
+    public static class MemStd {
         public MemStdUsage heap;
         public MemStdUsage nonheap;
         public int pending;
@@ -72,7 +46,7 @@ public class Welcome {
         }
     }
 
-    public class MemPool {
+    public static class MemPool {
         public String name;
         public MemStdUsage usage;
         public MemStdUsage collection;
@@ -84,7 +58,7 @@ public class Welcome {
         }
     }
 
-    public class BufferPool {
+    public static class BufferPool {
         public String name;
         public long used;
         public long count;
@@ -97,7 +71,7 @@ public class Welcome {
         }
     }
 
-    public class Stats {
+    public static class Stats {
         public long served;
         public List<MemStd> memStd = new ArrayList<>();
         public List<MemPool> memPool = new ArrayList<>();

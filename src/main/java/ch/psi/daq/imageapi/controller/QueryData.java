@@ -830,6 +830,36 @@ public class QueryData {
         Mono<Flux<DataBuffer>> mret = queryMono
         .doOnError(x -> LOGGER.info("can not parse request"))
         .map(query -> {
+            BinFind binFind;
+            List<AggFunc> aggs;
+            if (query.aggregation != null) {
+                binFind = new BinFind(query.aggregation.nrOfBins, query.range);
+                aggs = new ArrayList<>();
+                for (String n : query.aggregation.aggregations) {
+                    if (n.equals("sum")) {
+                        aggs.add(new AggSum());
+                    }
+                    else if (n.equals("mean")) {
+                        aggs.add(new AggMean());
+                    }
+                    else if (n.equals("min")) {
+                        aggs.add(new AggMin());
+                    }
+                    else if (n.equals("max")) {
+                        aggs.add(new AggMax());
+                    }
+                }
+            }
+            else {
+                try {
+                    LOGGER.warn("no aggregation in query: {}", new ObjectMapper().writeValueAsString(query));
+                }
+                catch (IOException e) {
+                    LOGGER.warn("no aggregation in query but can not show exception");
+                }
+                binFind = null;
+                aggs = null;
+            }
             QueryParams qp = QueryParams.fromQuery(query, defaultDataBufferFactory, bufferSize);
             LOGGER.info(String.format("%s  queryMerged  %s  %s  %s", req.getId(), qp.begin, qp.end, qp.channels));
             JgenState jst = new JgenState();
@@ -846,9 +876,13 @@ public class QueryData {
             catch (IOException e) {
                 throw new RuntimeException(e);
             }
+            AtomicLong binCurrent = new AtomicLong(-100);
+            AtomicLong evCount = new AtomicLong();
+            AtomicLong binTs = new AtomicLong();
+            AtomicLong binPulse = new AtomicLong();
             return buildMerged(qp, req, new TransformSup3(qp))
             .map(res -> {
-                LOGGER.trace("MapJsonResult  {}", res.items.size());
+                //LOGGER.trace("MapJsonResult  {}", res.items.size());
                 try {
                     for (MapJsonItem item : res.items) {
                         if (item instanceof MapJsonChannelStart) {
@@ -863,17 +897,56 @@ public class QueryData {
                         }
                         else if (item instanceof MapJsonEvent) {
                             MapJsonEvent ev = (MapJsonEvent) item;
-                            jgen.writeStartObject();
-                            jgen.writeFieldName("ts");
-                            jgen.writeStartObject();
-                            jgen.writeNumberField("sec", ev.ts / 1000000000L);
-                            jgen.writeNumberField("nanos", ev.ts & 1000000000L);
-                            jgen.writeEndObject();
-                            jgen.writeNumberField("pulse", ev.pulse);
-                            jgen.writeFieldName("data");
-                            ev.data.serialize(jgen, new DefaultSerializerProvider.Impl());
-                            //jgen.writeObject(ev.data);
-                            jgen.writeEndObject();
+                            if (binFind != null) {
+                                int bin = binFind.find(ev.ts);
+                                LOGGER.warn("bin {}  binCurrent {}", bin, binCurrent.get());
+                                if (binCurrent.get() == -100) {
+                                    binCurrent.set(bin);
+                                    binTs.set(ev.ts);
+                                    binPulse.set(ev.pulse);
+                                }
+                                else if (bin != binCurrent.get()) {
+                                    jgen.writeStartObject();
+                                    jgen.writeFieldName("ts");
+                                    jgen.writeStartObject();
+                                    jgen.writeNumberField("sec", binTs.get() / 1000000000L);
+                                    jgen.writeNumberField("ns", binTs.get() % 1000000000L);
+                                    jgen.writeEndObject();
+                                    jgen.writeNumberField("pulse", binPulse.get());
+                                    jgen.writeObjectFieldStart("data");
+                                    for (AggFunc f : aggs) {
+                                        jgen.writeFieldName(f.name());
+                                        f.result().serialize(jgen, new DefaultSerializerProvider.Impl());
+                                    }
+                                    jgen.writeEndObject();
+                                    jgen.writeNumberField("eventCount", evCount.get());
+                                    jgen.writeEndObject();
+                                    binCurrent.set(bin);
+                                    binTs.set(ev.ts);
+                                    binPulse.set(ev.pulse);
+                                    evCount.set(0);
+                                    for (AggFunc f : aggs) {
+                                        f.reset();
+                                    }
+                                }
+                                evCount.getAndAdd(1);
+                                for (AggFunc f : aggs) {
+                                    f.sink(ev.data);
+                                }
+                            }
+                            else {
+                                jgen.writeStartObject();
+                                jgen.writeFieldName("ts");
+                                jgen.writeStartObject();
+                                jgen.writeNumberField("sec", ev.ts / 1000000000L);
+                                jgen.writeNumberField("ns", ev.ts % 1000000000L);
+                                jgen.writeEndObject();
+                                jgen.writeNumberField("pulse", ev.pulse);
+                                jgen.writeFieldName("data");
+                                ev.data.serialize(jgen, new DefaultSerializerProvider.Impl());
+                                //jgen.writeObject(ev.data);
+                                jgen.writeEndObject();
+                            }
                         }
                         else {
                             throw new RuntimeException("logic");
@@ -888,6 +961,25 @@ public class QueryData {
             })
             .concatWith(Mono.defer(() -> {
                 try {
+                    if (jst.inChannel) {
+                        if (binFind != null) {
+                            jgen.writeStartObject();
+                            jgen.writeFieldName("ts");
+                            jgen.writeStartObject();
+                            jgen.writeNumberField("sec", binTs.get() / 1000000000L);
+                            jgen.writeNumberField("ns", binTs.get() % 1000000000L);
+                            jgen.writeEndObject();
+                            jgen.writeNumberField("pulse", binPulse.get());
+                            jgen.writeObjectFieldStart("data");
+                            for (AggFunc f : aggs) {
+                                jgen.writeFieldName(f.name());
+                                f.result().serialize(jgen, new DefaultSerializerProvider.Impl());
+                            }
+                            jgen.writeEndObject();
+                            jgen.writeNumberField("eventCount", evCount.get());
+                            jgen.writeEndObject();
+                        }
+                    }
                     jst.beOutOfChannel(jgen);
                     jgen.writeEndArray();
                     jgen.close();

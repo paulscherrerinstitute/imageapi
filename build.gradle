@@ -31,7 +31,7 @@ java {
 }
 
 group 'ch.psi.daq'
-version '0.0.4-aa.0024'
+version '0.0.5-adev.0012'
 
 bintray {
     user = System.getenv('BINTRAY_USER')
