@@ -3,7 +3,7 @@ buildscript {
         jcenter()
     }
     dependencies {
-        classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.+'
+        classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.8.0'
     }
 }
 
@@ -45,9 +45,9 @@ bintray {
         version {
             name = project.version
         }
-        publish = true
+        //publish = true
     }
-    publications = ['bootJava']
+    publications = ['bootJarFile']
 }
 
 repositories {
@@ -87,18 +87,8 @@ jacocoTestReport {
 
 publishing {
     publications {
-        bootJava(MavenPublication) {
+        bootJarFile(MavenPublication) {
             artifact bootJar
-        }
-    }
-    repositories {
-        maven {
-            name "psi"
-            url "https://artifacts.psi.ch/artifactory/libs-snapshots-local"
-            credentials {
-                username = "upload"
-                password = "AP7pYDKfdXVWMnSQ"
-            }
         }
     }
 }
