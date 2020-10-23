@@ -691,7 +691,7 @@ public class EventBlobToJsonMap implements Function<DataBuffer, MapJsonResult> {
         header.name = channelName;
         if (blobsType != -1) {
             mapev.type = DTypeBitmapUtils.Type.lookup((short) blobsType).toString().toLowerCase();
-            mapev.byteOrder = blobsByteOrder.toString();
+            mapev.byteOrder = blobsByteOrder;
             mapev.array = blobsArray == 1;
             mapev.shape = Arrays.stream(shapeLens, 0, shapeDims).boxed().collect(Collectors.toList());
         }

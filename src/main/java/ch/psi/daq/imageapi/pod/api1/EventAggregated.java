@@ -7,4 +7,9 @@ public class EventAggregated {
     public long pulse;
     public long eventCount;
     public Map<String, AggResult> data;
+    public EventAggregated(long ts, long pulse, long eventCount) {
+        this.ts = new Ts(ts);
+        this.pulse = pulse;
+        this.eventCount = eventCount;
+    }
 }

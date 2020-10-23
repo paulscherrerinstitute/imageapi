@@ -2,6 +2,7 @@ package ch.psi.daq.imageapi.eventmap.value;
 
 import ch.psi.daq.imageapi.pod.api1.Range;
 
+import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 
@@ -16,7 +17,8 @@ public class BinFind {
         this.nBins = nBins;
         this.ts1 = ZonedDateTime.parse(range.startDate);
         this.ts2 = ZonedDateTime.parse(range.endDate);
-        this.off = 1000000000L * ts1.toInstant().getEpochSecond() + (long) ts1.toInstant().getNano();
+        Instant ts1i = ts1.toInstant();
+        this.off = 1000000000L * ts1i.getEpochSecond() + (long) ts1i.getNano();
         dt = 1000 * ChronoUnit.MICROS.between(ts1, ts2);
     }
 

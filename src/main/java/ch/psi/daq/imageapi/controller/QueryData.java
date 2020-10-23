@@ -834,43 +834,20 @@ public class QueryData {
                 }
             }
             else {
-                try {
-                    LOGGER.warn("no aggregation in query: {}", new ObjectMapper().writeValueAsString(query));
-                }
-                catch (IOException e) {
-                    LOGGER.warn("no aggregation in query but can not show exception");
-                }
                 binFind = null;
                 aggs = null;
             }
             QueryParams qp = QueryParams.fromQuery(query, defaultDataBufferFactory, bufferSize);
             LOGGER.info(String.format("%s  queryMerged  %s  %s  %s", req.getId(), qp.begin, qp.end, qp.channels));
-            JgenState jst = new JgenState();
-            JsonGenerator jgen;
-            JsonFactory jfac = new JsonFactory();
-            OutputBuffer outbuf = new OutputBuffer(qp.bufFac);
-            try {
-                jgen = jfac.createGenerator(outbuf);
-                jgen.setCodec(new ObjectMapper());
-                // Sending the response as a plain array instead of wrapping the array of channels into an object-
-                // member is specifically demanded.
-                // https://jira.psi.ch/browse/CTRLIT-7984
-                jgen.writeStartArray();
-            }
-            catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            AggMapper mapper = new AggMapper(jgen, jst, binFind, aggs, outbuf);
+            AggMapper mapper = new AggMapper(binFind, aggs, qp.bufFac);
             return buildMerged(qp, req, new TransformSup3(qp))
-            .map(res -> mapper.map(res))
-            .concatWith(Mono.defer(() -> mapper.finalResult()))
+            .map(mapper::map)
+            .concatWith(Mono.defer(() -> Mono.just(mapper.finalResult())))
             .concatMapIterable(Function.identity(), 1)
             .doOnNext(buf -> {
                 totalBytesServed.getAndAdd(buf.readableByteCount());
             })
-            .doOnTerminate(() -> {
-                outbuf.release();
-            });
+            .doOnTerminate(mapper::release);
         });
         return logMono("queryMergedJson", req, mret.map(x -> {
             return ResponseEntity.ok()
