@@ -1,7 +1,9 @@
-package ch.psi.daq.imageapi.controller;
+package ch.psi.daq.imageapi.eventmap.value;
 
+import ch.psi.daq.imageapi.pod.api1.AggResult;
+import ch.psi.daq.imageapi.pod.api1.AggResultNothing;
+import ch.psi.daq.imageapi.pod.api1.AggResultSum;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 public class AggMin implements AggFunc {
     double min = Double.POSITIVE_INFINITY;
@@ -20,11 +22,13 @@ public class AggMin implements AggFunc {
     public void reset() {
     }
 
-    public JsonNode result() {
+    public AggResult result() {
         if (min == Double.POSITIVE_INFINITY) {
-            return JsonNodeFactory.instance.nullNode();
+            return new AggResultNothing();
         }
-        return JsonNodeFactory.instance.numberNode(min);
+        AggResultSum ret = new AggResultSum();
+        ret.sum = min;
+        return ret;
     }
 
 }

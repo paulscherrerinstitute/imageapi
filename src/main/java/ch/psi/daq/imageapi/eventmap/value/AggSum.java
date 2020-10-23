@@ -1,8 +1,9 @@
-package ch.psi.daq.imageapi.controller;
+package ch.psi.daq.imageapi.eventmap.value;
 
+import ch.psi.daq.imageapi.pod.api1.AggResult;
+import ch.psi.daq.imageapi.pod.api1.AggResultSum;
 import ch.qos.logback.classic.Logger;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.slf4j.LoggerFactory;
 
 public class AggSum implements AggFunc {
@@ -25,8 +26,10 @@ public class AggSum implements AggFunc {
         sum = 0.0;
     }
 
-    public JsonNode result() {
-        return JsonNodeFactory.instance.numberNode(sum);
+    public AggResult result() {
+        AggResultSum ret = new AggResultSum();
+        ret.sum = sum;
+        return ret;
     }
 
 }

@@ -1,4 +1,4 @@
-package ch.psi.daq.imageapi.controller;
+package ch.psi.daq.imageapi.eventmap.value;
 
 import ch.psi.daq.imageapi.pod.api1.Range;
 
@@ -21,7 +21,6 @@ public class BinFind {
     }
 
     public int find(long ts) {
-        //ZonedDateTime.ofInstant(Instant.ofEpochSecond(ts/1000000000L, ts % 1000000000L), ZoneOffset.UTC);
         if (ts < off) {
             throw new RuntimeException("timestamp smaller than start of range");
         }
